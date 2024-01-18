@@ -277,7 +277,7 @@ android_device_create()
 	            .w_meters = w_meters,
 	            .h_meters = h_meters,
 	        },
-	    .inter_lens_distance_meters = 0.06f,
+	    .inter_lens_distance_meters = 0.067f,
 	    .lens_y_center_on_screen_meters = h_meters / 2.0f,
 	    .screen_to_lens_distance_meters = 0.042f,
 	    .fov =
@@ -289,7 +289,7 @@ android_device_create()
 	        },
 	};
     if (!u_cardboard_distortion_arguments_read(current_device_params_file, &args)) {
-        U_LOG_W("Failed to load cardboard calibration file, default distoration parameters will be used.");
+        U_LOG_W("Failed to load cardboard calibration file, default distortion parameters will be used.");
     }
 
     u_distortion_cardboard_calculate(&args, d->base.hmd, &d->cardboard);
