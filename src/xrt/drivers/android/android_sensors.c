@@ -18,6 +18,7 @@
 #include "util/u_distortion_mesh.h"
 
 #include "android/android_globals.h"
+#include "android/android_environment.h"
 #include "android/android_custom_surface.h"
 
 #include <xrt/xrt_config_android.h>
@@ -260,7 +261,14 @@ android_device_create()
 	const float w_meters = ((float)w_pixels / (float)ppi) * 0.0254f;
 	const float h_meters = ((float)h_pixels / (float)ppi) * 0.0254f;
 
-	struct u_cardboard_distortion_arguments args = {
+    char current_device_params_file[255] = {'\0'};
+    if (android_enviroment_get_external_storage_dir(current_device_params_file,
+                                                    sizeof(current_device_params_file))) {
+        strncat(current_device_params_file, "/Cardboard/current_device_params",
+                sizeof(current_device_params_file));
+    }
+
+    struct u_cardboard_distortion_arguments args = {
 	    .distortion_k = {0.441f, 0.156f, 0.f, 0.f, 0.f},
 	    .screen =
 	        {
@@ -280,8 +288,11 @@ android_device_create()
 	            .angle_down = -angle,
 	        },
 	};
+    if (!u_cardboard_distortion_arguments_read(current_device_params_file, &args)) {
+        U_LOG_W("Failed to load cardboard calibration file, default distoration parameters will be used.");
+    }
 
-	u_distortion_cardboard_calculate(&args, d->base.hmd, &d->cardboard);
+    u_distortion_cardboard_calculate(&args, d->base.hmd, &d->cardboard);
 
 
 	u_var_add_root(d, "Android phone", true);

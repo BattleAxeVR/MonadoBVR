@@ -73,7 +73,7 @@ ext {
     ndk_version = '21.4.7075529'
     // If you update this, must also update .gitlab-ci/config.yml
     sharedCompileSdk = 32
-    sharedTargetSdk = 31
+    sharedTargetSdk = 28
     sharedMinSdk = 26
 
     // If you are building on Windows, you will need to explicitly set eigenIncludeDir in your
