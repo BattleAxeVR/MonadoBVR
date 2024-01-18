@@ -235,11 +235,11 @@ android_device_create()
 	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_context(),
 	                                                &metrics)) {
 		U_LOG_E("Could not get Android display metrics.");
-		/* Fallback to default values (Pixel 3) */
-		metrics.width_pixels = 2960;
+		/* Fallback to default values (Poco F5 Pro) */
+		metrics.width_pixels = 3200;
 		metrics.height_pixels = 1440;
-		metrics.density_dpi = 572;
-		metrics.refresh_rate = 60.0f;
+		metrics.density_dpi = 526;
+		metrics.refresh_rate = 120.0f;
 	}
 
 	d->base.hmd->screens[0].nominal_frame_interval_ns = time_s_to_ns(1.0f / metrics.refresh_rate);
