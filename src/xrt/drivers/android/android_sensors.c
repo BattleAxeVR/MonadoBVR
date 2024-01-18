@@ -292,6 +292,11 @@ android_device_create()
         U_LOG_W("Failed to load cardboard calibration file, default distortion parameters will be used.");
     }
 
+#if 1
+    // Force my IPD always, TODO: Add an override method here for other users
+    args.inter_lens_distance_meters = 0.067f;
+#endif
+
     u_distortion_cardboard_calculate(&args, d->base.hmd, &d->cardboard);
 
 
