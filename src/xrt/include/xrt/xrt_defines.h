@@ -392,6 +392,18 @@ struct xrt_rect
 };
 
 /*!
+ * Image rectangle
+ *
+ * @todo Unify xrt_rect and xrt_rect_f32 field names
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_rect_f32
+{
+	float x, y, w, h;
+};
+
+/*!
  * Normalized image rectangle, coordinates and size in 0 .. 1 range.
  *
  * @ingroup xrt_iface math
@@ -657,6 +669,8 @@ struct xrt_relation_chain
  */
 enum xrt_device_name
 {
+	XRT_DEVICE_INVALID = 0,
+
 	XRT_DEVICE_GENERIC_HMD = 1,
 
 	// Vive stuff.

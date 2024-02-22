@@ -34,6 +34,8 @@
 #include "vive_protocol.h"
 #include "vive_source.h"
 #include "xrt/xrt_tracking.h"
+#include "xrt/xrt_config_have.h"
+#include "xrt/xrt_config_build.h"
 
 // Used to scale the IMU range from config.
 #define VIVE_IMU_RANGE_CONVERSION_VALUE (32768.0)
@@ -156,7 +158,9 @@ vive_device_get_slam_tracked_pose(struct xrt_device *xdev,
 	bool pose_tracked = out_relation->relation_flags & pose_bits;
 
 	if (pose_tracked) {
-#if defined(XRT_HAVE_BASALT)
+#ifdef XRT_FEATURE_SLAM
+		// !todo Correct pose depending on the VIT system in use, this should be done in the system itself.
+		// For now, assume that we are using Basalt.
 		d->pose = vive_device_correct_pose_from_basalt(out_relation->pose);
 #else
 		d->pose = out_relation->pose;
@@ -326,6 +330,59 @@ oldest_sequence_index(uint8_t a, uint8_t b, uint8_t c)
 	return 0;
 }
 
+static inline void
+convert_imu_to_openxr(struct vive_device *d, struct xrt_vec3 *gyro, struct xrt_vec3 *accel)
+{
+	switch (d->config.variant) {
+	case VIVE_VARIANT_VIVE: { // flip all except x axis
+		accel->x = +accel->x;
+		accel->y = -accel->y;
+		accel->z = -accel->z;
+		gyro->x = +gyro->x;
+		gyro->y = -gyro->y;
+		gyro->z = -gyro->z;
+		break;
+	}
+	case VIVE_VARIANT_PRO: { // flip all except y axis
+		accel->x = -accel->x;
+		accel->y = +accel->y;
+		accel->z = -accel->z;
+		gyro->x = -gyro->x;
+		gyro->y = +gyro->y;
+		gyro->z = -gyro->z;
+		break;
+	}
+	case VIVE_VARIANT_PRO2: {
+		accel->x = -accel->x;
+		accel->y = accel->y;
+		accel->z = -accel->z;
+		gyro->x = -gyro->x;
+		gyro->y = gyro->y;
+		gyro->z = -gyro->z;
+		break;
+	}
+	case VIVE_VARIANT_INDEX: { // Flip all axis and re-order.
+		struct xrt_vec3 accel_fixed;
+		accel_fixed.x = -accel->y;
+		accel_fixed.y = -accel->x;
+		accel_fixed.z = -accel->z;
+		*accel = accel_fixed;
+
+		struct xrt_vec3 gyro_fixed;
+		gyro_fixed.x = -gyro->y;
+		gyro_fixed.y = -gyro->x;
+		gyro_fixed.z = -gyro->z;
+		*gyro = gyro_fixed;
+
+		break;
+	}
+	default: {
+		VIVE_ERROR(d, "Unhandled Vive variant");
+		return;
+	}
+	}
+}
+
 static void
 update_imu(struct vive_device *d, const void *buffer)
 {
@@ -386,6 +443,7 @@ update_imu(struct vive_device *d, const void *buffer)
 		    scale * acc_scale[1] * acc[1] - acc_bias[1],
 		    scale * acc_scale[2] * acc[2] - acc_bias[2],
 		};
+		struct xrt_vec3 raw_accel = {.x = scale * acc[0], .y = scale * acc[1], .z = scale * acc[2]};
 
 		VIVE_TRACE(d, "ACC  %f %f %f (%f - %f, %f - %f, %f - %f)", //
 		           acceleration.x,                                 //
@@ -422,6 +480,7 @@ update_imu(struct vive_device *d, const void *buffer)
 		    scale * gyro_scale[1] * gyro[1] - gyro_bias[1],
 		    scale * gyro_scale[2] * gyro[2] - gyro_bias[2],
 		};
+		struct xrt_vec3 raw_gyro = {.x = scale * gyro[0], .y = scale * gyro[1], .z = scale * gyro[2]};
 
 		VIVE_TRACE(d, "GYRO %f %f %f (%f - %f, %f - %f, %f - %f)", //
 		           angular_velocity.x,                             //
@@ -435,54 +494,8 @@ update_imu(struct vive_device *d, const void *buffer)
 		           gyro_bias[2]);                                  //
 
 
-		switch (d->config.variant) {
-		case VIVE_VARIANT_VIVE:
-			// flip all except x axis
-			acceleration.x = +acceleration.x;
-			acceleration.y = -acceleration.y;
-			acceleration.z = -acceleration.z;
-
-			angular_velocity.x = +angular_velocity.x;
-			angular_velocity.y = -angular_velocity.y;
-			angular_velocity.z = -angular_velocity.z;
-			break;
-		case VIVE_VARIANT_PRO: {
-			// flip all except y axis
-			acceleration.x = -acceleration.x;
-			acceleration.y = +acceleration.y;
-			acceleration.z = -acceleration.z;
-
-			angular_velocity.x = -angular_velocity.x;
-			angular_velocity.y = +angular_velocity.y;
-			angular_velocity.z = -angular_velocity.z;
-			break;
-		}
-		case VIVE_VARIANT_PRO2: {
-			acceleration.x = -acceleration.x;
-			acceleration.y = acceleration.y;
-			acceleration.z = -acceleration.z;
-
-			angular_velocity.x = -angular_velocity.x;
-			angular_velocity.y = angular_velocity.y;
-			angular_velocity.z = -angular_velocity.z;
-		} break;
-
-		case VIVE_VARIANT_INDEX: {
-			// Flip all axis and re-order.
-			struct xrt_vec3 acceleration_fixed;
-			acceleration_fixed.x = -acceleration.y;
-			acceleration_fixed.y = -acceleration.x;
-			acceleration_fixed.z = -acceleration.z;
-			acceleration = acceleration_fixed;
-
-			struct xrt_vec3 angular_velocity_fixed;
-			angular_velocity_fixed.x = -angular_velocity.y;
-			angular_velocity_fixed.y = -angular_velocity.x;
-			angular_velocity_fixed.z = -angular_velocity.z;
-			angular_velocity = angular_velocity_fixed;
-		} break;
-		default: VIVE_ERROR(d, "Unhandled Vive variant"); return;
-		}
+		convert_imu_to_openxr(d, &acceleration, &angular_velocity);
+		convert_imu_to_openxr(d, &raw_accel, &raw_gyro);
 
 		d->imu.sequence = seq;
 
@@ -500,7 +513,7 @@ update_imu(struct vive_device *d, const void *buffer)
 		assert(j > 0);
 		uint32_t age = j <= 0 ? 0 : (uint32_t)(j - 1);
 
-		vive_source_push_imu_packet(d->source, age, d->imu.last_sample_ts_ns, acceleration, angular_velocity);
+		vive_source_push_imu_packet(d->source, age, d->imu.last_sample_ts_ns, raw_accel, raw_gyro);
 	}
 }
 

@@ -36,6 +36,7 @@
 #include "util/u_trace_marker.h"
 #include "util/u_var.h"
 
+#include "xrt/xrt_config_build.h"
 #include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_device.h"
 
@@ -231,6 +232,7 @@ rift_s_create_slam_tracker(struct rift_s_tracker *t, struct xrt_frame_context *x
 static int
 rift_s_create_hand_tracker(struct rift_s_tracker *t,
                            struct xrt_frame_context *xfctx,
+                           struct xrt_hand_masks_sink *masks_sink,
                            struct xrt_slam_sinks **out_sinks,
                            struct xrt_device **out_device)
 {
@@ -251,10 +253,12 @@ rift_s_create_hand_tracker(struct rift_s_tracker *t,
 	extra_camera_info.views[0].camera_orientation = CAMERA_ORIENTATION_90;
 	extra_camera_info.views[1].camera_orientation = CAMERA_ORIENTATION_90;
 
+	struct t_hand_tracking_create_info create_info = {.cams_info = extra_camera_info, .masks_sink = masks_sink};
+
 	int create_status = ht_device_create(xfctx,           //
 	                                     t->stereo_calib, //
-	                                     extra_camera_info,
-	                                     &sinks, //
+	                                     create_info,     //
+	                                     &sinks,          //
 	                                     &device);
 	if (create_status != 0) {
 		return create_status;
@@ -400,8 +404,9 @@ rift_s_tracker_create(struct xrt_tracking_origin *origin,
 	// Initialize hand tracker
 	struct xrt_slam_sinks *hand_sinks = NULL;
 	struct xrt_device *hand_device = NULL;
+	struct xrt_hand_masks_sink *masks_sink = slam_sinks->hand_masks;
 	if (t->tracking.hand_enabled) {
-		int hand_status = rift_s_create_hand_tracker(t, xfctx, &hand_sinks, &hand_device);
+		int hand_status = rift_s_create_hand_tracker(t, xfctx, masks_sink, &hand_sinks, &hand_device);
 		if (hand_status != 0 || hand_sinks == NULL || hand_device == NULL) {
 			RIFT_S_WARN("Unable to setup the hand tracker");
 			rift_s_tracker_destroy(t);
@@ -635,11 +640,11 @@ rift_s_tracker_get_tracked_pose(struct rift_s_tracker *t,
 
 		// Get the IMU pose from the SLAM tracker
 		xrt_tracked_slam_get_tracked_pose(t->tracking.slam, at_timestamp_ns, &imu_relation);
-
-#if defined(XRT_HAVE_BASALT)
+#ifdef XRT_FEATURE_SLAM
+		// !todo Correct pose depending on the VIT system in use, this should be done in the system itself.
+		// For now, assume that we are using Basalt.
 		rift_s_tracker_correct_pose_from_basalt(&imu_relation.pose);
 #endif
-
 		imu_relation.relation_flags = (enum xrt_space_relation_flags)(
 		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 		    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
