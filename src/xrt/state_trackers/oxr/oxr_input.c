@@ -1,10 +1,11 @@
-// Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds input related functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -746,6 +747,25 @@ struct oxr_profiles_per_subaction
 #undef PROFILE_MEMBER
 };
 
+static void
+oxr_find_profiles_from_roles(struct oxr_logger *log,
+                             struct oxr_session *sess,
+                             struct oxr_profiles_per_subaction *out_profiles)
+{
+#define FIND_PROFILE(X)                                                                                                \
+	{                                                                                                              \
+		struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, X);                                              \
+		if (xdev != NULL) {                                                                                    \
+			oxr_find_profile_for_device(log, sess, xdev, &out_profiles->X);                                \
+		} else {                                                                                               \
+			oxr_get_profile_for_device_name(log, sess, GET_PROFILE_NAME_BY_ROLE(sess->sys, X),             \
+			                                &out_profiles->X);                                             \
+		}                                                                                                      \
+	}
+	OXR_FOR_EACH_VALID_SUBACTION_PATH(FIND_PROFILE)
+#undef FIND_PROFILE
+}
+
 /*!
  * @public @memberof oxr_action_attachment
  */
@@ -783,6 +803,10 @@ oxr_action_attachment_bind(struct oxr_logger *log,
 	 * and sticks with it.
 	 */
 	if (act_ref->action_type == XR_ACTION_TYPE_POSE_INPUT) {
+
+#define RESET_ANY(NAME) act_attached->any_pose_subaction_path.NAME = false;
+		OXR_FOR_EACH_VALID_SUBACTION_PATH(RESET_ANY)
+#undef RESET_ANY
 
 #define POSE_ANY(NAME)                                                                                                 \
 	if ((act_ref->subaction_paths.NAME || act_ref->subaction_paths.any) && act_attached->NAME.input_count > 0) {   \
@@ -1047,7 +1071,7 @@ oxr_action_cache_update(struct oxr_logger *log,
 	}
 
 	struct oxr_input_value_tagged combined;
-	int64_t timestamp;
+	int64_t timestamp = time;
 
 	/* a cache can only have outputs or inputs, not both */
 	if (cache->output_count > 0) {
@@ -1206,7 +1230,7 @@ oxr_action_attachment_update(struct oxr_logger *log,
 	struct oxr_action_state last = act_attached->any_state;
 	bool active = false;
 	bool changed = false;
-	XrTime timestamp = 0;
+	XrTime timestamp = time_state_monotonic_to_ts_ns(sess->sys->inst->timekeeping, time);
 
 	switch (act_attached->act_ref->action_type) {
 	case XR_ACTION_TYPE_BOOLEAN_INPUT: {
@@ -1643,6 +1667,7 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 	}
 
 #define POPULATE_PROFILE(X)                                                                                            \
+	sess->X = XR_NULL_PATH;                                                                                        \
 	if (profiles.X != NULL) {                                                                                      \
 		sess->X = profiles.X->path;                                                                            \
 		oxr_event_push_XrEventDataInteractionProfileChanged(log, sess);                                        \
@@ -1656,10 +1681,7 @@ XrResult
 oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *sess)
 {
 	struct oxr_profiles_per_subaction profiles = {0};
-
-#define FIND_PROFILE(X) oxr_find_profile_for_device(log, sess, GET_XDEV_BY_ROLE(sess->sys, X), &profiles.X);
-	OXR_FOR_EACH_VALID_SUBACTION_PATH(FIND_PROFILE)
-#undef FIND_PROFILE
+	oxr_find_profiles_from_roles(log, sess, &profiles);
 
 	for (size_t i = 0; i < sess->action_set_attachment_count; i++) {
 		struct oxr_action_set_attachment *act_set_attached = &sess->act_set_attachments[i];
@@ -1670,6 +1692,7 @@ oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *s
 	}
 
 #define POPULATE_PROFILE(X)                                                                                            \
+	sess->X = XR_NULL_PATH;                                                                                        \
 	if (profiles.X != NULL) {                                                                                      \
 		sess->X = profiles.X->path;                                                                            \
 		oxr_event_push_XrEventDataInteractionProfileChanged(log, sess);                                        \

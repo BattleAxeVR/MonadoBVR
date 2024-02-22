@@ -564,6 +564,12 @@ oxr_find_profile_for_device(struct oxr_logger *log,
                             struct xrt_device *xdev,
                             struct oxr_interaction_profile **out_p);
 
+void
+oxr_get_profile_for_device_name(struct oxr_logger *log,
+                                struct oxr_session *sess,
+                                enum xrt_device_name name,
+                                struct oxr_interaction_profile **out_p);
+
 struct oxr_interaction_profile *
 oxr_clone_profile(const struct oxr_interaction_profile *src_profile);
 
@@ -669,6 +675,15 @@ oxr_dpad_state_get_or_add(struct oxr_dpad_state *state, uint64_t key);
  */
 void
 oxr_dpad_state_deinit(struct oxr_dpad_state *state);
+
+/*!
+ * Clones all oxr_dpad_state
+ * @param dst_dpad_state destination of cloning
+ * @param src_dpad_state source of cloning
+ * @public @memberof oxr_dpad_state_clone
+ */
+bool
+oxr_dpad_state_clone(struct oxr_dpad_state *dst_dpad_state, const struct oxr_dpad_state *src_dpad_state);
 
 
 /*!
@@ -1394,6 +1409,44 @@ MAKE_GET_DYN_ROLES_FN(gamepad)
 
 #define GET_XDEV_BY_ROLE(SYS, ROLE) (get_role_##ROLE((SYS)))
 
+
+static inline enum xrt_device_name
+get_role_profile_head(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_eyes(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_hand_tracking_left(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_hand_tracking_right(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+
+#define MAKE_GET_DYN_ROLE_PROFILE_FN(ROLE)                                                                             \
+	static inline enum xrt_device_name get_role_profile_##ROLE(struct oxr_system *sys)                             \
+	{                                                                                                              \
+		const bool is_locked = 0 == os_mutex_trylock(&sys->sync_actions_mutex);                                \
+		const enum xrt_device_name profile_name = sys->dynamic_roles_cache.ROLE##_profile;                     \
+		if (is_locked) {                                                                                       \
+			os_mutex_unlock(&sys->sync_actions_mutex);                                                     \
+		}                                                                                                      \
+		return profile_name;                                                                                   \
+	}
+MAKE_GET_DYN_ROLE_PROFILE_FN(left)
+MAKE_GET_DYN_ROLE_PROFILE_FN(right)
+MAKE_GET_DYN_ROLE_PROFILE_FN(gamepad)
+#undef MAKE_GET_DYN_ROLES_FN
+
+#define GET_PROFILE_NAME_BY_ROLE(SYS, ROLE) (get_role_profile_##ROLE((SYS)))
 
 /*
  * Extensions helpers.
