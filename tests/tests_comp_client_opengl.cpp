@@ -101,7 +101,7 @@ TEST_CASE("opengl_client_compositor", "[.][needgpu]")
 			    return XRT_SUCCESS;
 		    };
 		xrt_swapchain_create_info xsci{};
-		xsci.format = GL_SRGB8_ALPHA8;
+		xsci.format = GL_RGBA16F;//GL_SRGB8_ALPHA8;
 		xsci.bits = (xrt_swapchain_usage_bits)(XRT_SWAPCHAIN_USAGE_COLOR | XRT_SWAPCHAIN_USAGE_SAMPLED);
 		xsci.sample_count = 1;
 		xsci.width = 800;

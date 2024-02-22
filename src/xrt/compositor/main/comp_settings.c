@@ -65,6 +65,10 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	s->use_compute = debug_get_bool_option_compute();
 
 	if (s->use_compute) {
+
+        //add_format(s, VK_FORMAT_A2B10G10R10_UNORM_PACK32);
+        add_format(s, VK_FORMAT_R16G16B16A16_SFLOAT);
+
 		// This was the default before, keep it first.
 		add_format(s, VK_FORMAT_B8G8R8A8_UNORM);
 
@@ -75,7 +79,7 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 		add_format(s, VK_FORMAT_A8B8G8R8_UNORM_PACK32);
 
 		// Untested: 30 bit format, should we move this higher up?
-		add_format(s, VK_FORMAT_A2B10G10R10_UNORM_PACK32);
+
 
 		// Untested: Super constrained platforms.
 		add_format(s, VK_FORMAT_A1R5G5B5_UNORM_PACK16);
@@ -85,6 +89,8 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 		 * On Android the most ubiquitous sRGB format is R8G8B8A8_SRGB.
 		 * https://vulkan.gpuinfo.org/listsurfaceformats.php?platform=android
 		 */
+        add_format(s, VK_FORMAT_R16G16B16A16_SFLOAT);
+
 		add_format(s, VK_FORMAT_R8G8B8A8_SRGB);
 
 		// Fallback
@@ -110,7 +116,7 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	}
 
 	s->display = debug_get_num_option_xcb_display();
-	s->color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	s->color_space = VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT;//VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 	s->present_mode = VK_PRESENT_MODE_FIFO_KHR;
 	s->fullscreen = debug_get_bool_option_xcb_fullscreen();
 	s->preferred.width = xdev->hmd->screens[0].w_pixels;

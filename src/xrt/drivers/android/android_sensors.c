@@ -305,7 +305,7 @@ android_device_create()
 	u_var_add_ro_vec3_f32(d, &d->fusion.last.gyro, "last.gyro");
 
 	d->base.orientation_tracking_supported = true;
-	d->base.position_tracking_supported = false;
+	d->base.position_tracking_supported = true;
 
 	// Distortion information.
 	u_distortion_mesh_fill_in_compute(&d->base);

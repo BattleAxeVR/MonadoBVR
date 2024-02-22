@@ -257,7 +257,7 @@ client_gl_eglimage_swapchain_create(struct xrt_compositor *xc,
 
 		if (is_gl_format_srgb(info->format)) {
 			attrs[4] = EGL_GL_COLORSPACE_KHR;
-			attrs[5] = EGL_GL_COLORSPACE_SRGB_KHR;
+			attrs[5] = 0x3362;//EGL_GL_COLORSPACE_SRGB_KHR;
 		}
 
 		EGLenum source = EGL_NATIVE_BUFFER_ANDROID;

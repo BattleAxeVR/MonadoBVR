@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "org.freedesktop.monado.openxr_runtime.in_process",
+  "variantName": "inProcessRelease",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 210004327,
+      "versionName": "v21.0.0-4327-g1bc6303-dirty",
+      "outputFile": "openxr_android-inProcess-release.apk"
+    }
+  ],
+  "elementType": "File"
+}
