@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "org.freedesktop.monado.openxr_runtime.out_of_process",
+  "variantName": "outOfProcessRelease",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 210004329,
+      "versionName": "v21.0.0-4329-g8ca5752",
+      "outputFile": "openxr_android-outOfProcess-release.apk"
+    }
+  ],
+  "elementType": "File"
+}
