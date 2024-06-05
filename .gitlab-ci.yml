@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CC0-1.0
-# SPDX-FileCopyrightText: 2018-2023 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2018-2024 Collabora, Ltd. and the Monado contributors
 
 ###############################################
 # GENERATED - DO NOT EDIT
@@ -40,12 +40,8 @@ stages:
 # Extra rules for packaging
 .monado.packaging.conditions:
   rules:
-    # Only the default branch of the "upstream" repo.
-    - if: "$CI_PROJECT_PATH == $FDO_UPSTREAM_REPO && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH"
-      when: on_success
-    # Otherwise, don't build packages.
-    - when: never
-
+    # Only the default branch of the "upstream" repo on push.
+    - if: $CI_PROJECT_PATH == $FDO_UPSTREAM_REPO && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
 
 ###
 ###
@@ -126,11 +122,17 @@ win:container_prep:
 
 
 
+# Variables for build and usage of Debian bookworm image
+.monado.variables.debian:bookworm:
+  variables:
+    FDO_DISTRIBUTION_VERSION: "bookworm"
+    FDO_DISTRIBUTION_TAG: "2024-04-16"
+
 # Variables for build and usage of Debian bullseye image
 .monado.variables.debian:bullseye:
   variables:
     FDO_DISTRIBUTION_VERSION: "bullseye"
-    FDO_DISTRIBUTION_TAG: "2024-01-16"
+    FDO_DISTRIBUTION_TAG: "2024-03-21"
 
 # Variables for build and usage of Debian bookworm-ndk image
 .monado.variables.debian:bookworm-ndk:
@@ -149,7 +151,13 @@ win:container_prep:
 .monado.variables.ubuntu:jammy:
   variables:
     FDO_DISTRIBUTION_VERSION: "22.04"
-    FDO_DISTRIBUTION_TAG: "2024-01-16"
+    FDO_DISTRIBUTION_TAG: "2024-04-16"
+
+# Variables for build and usage of Ubuntu noble image
+.monado.variables.ubuntu:noble:
+  variables:
+    FDO_DISTRIBUTION_VERSION: "24.04"
+    FDO_DISTRIBUTION_TAG: "2024-05-11"
 
 # Variables for build and usage of Arch image
 .monado.variables.arch:
@@ -164,6 +172,18 @@ win:container_prep:
 
 ###
 # Container prep jobs
+# Make Debian bookworm image
+debian:bookworm:container_prep:
+  stage: container_prep
+  extends:
+    - .container-rules
+    - .monado.variables.debian:bookworm
+    - .fdo.container-build@debian # from ci-templates
+
+  variables:
+    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates clang-format cmake codespell curl debhelper devscripts doxygen dput-ng gettext-base git glslang-tools graphviz libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pipx pkg-config python3 python3-click python3-pip reprepro unzip wayland-protocols wget'
+    FDO_DISTRIBUTION_EXEC: 'env FDO_CI_CONCURRENT=${FDO_CI_CONCURRENT} bash .gitlab-ci/i386_and_proclamation_container_prep.sh'
+
 # Make Debian bullseye image
 debian:bullseye:container_prep:
   stage: container_prep
@@ -173,8 +193,7 @@ debian:bullseye:container_prep:
     - .fdo.container-build@debian # from ci-templates
 
   variables:
-    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates clang-format cmake codespell curl debhelper devscripts doxygen dput-ng gettext-base git glslang-tools graphviz libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 python3-click python3-pip unzip wget'
-    FDO_DISTRIBUTION_EXEC: 'env FDO_CI_CONCURRENT=${FDO_CI_CONCURRENT} bash .gitlab-ci/i386_and_proclamation_container_prep.sh'
+    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates cmake curl debhelper devscripts dput-ng gettext-base git glslang-tools libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 unzip wayland-protocols wget'
 
 # Make Debian bookworm-ndk image
 debian:bookworm-ndk:container_prep:
@@ -197,7 +216,7 @@ ubuntu:focal:container_prep:
     - .fdo.container-build@ubuntu # from ci-templates
 
   variables:
-    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates cmake curl debhelper devscripts dput-ng gettext-base git glslang-tools libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 unzip wget'
+    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates cmake curl debhelper devscripts dput-ng gettext-base git glslang-tools libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 unzip wayland-protocols wget'
 
 # Make Ubuntu jammy image
 ubuntu:jammy:container_prep:
@@ -208,7 +227,18 @@ ubuntu:jammy:container_prep:
     - .fdo.container-build@ubuntu # from ci-templates
 
   variables:
-    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates cmake curl debhelper devscripts dput-ng gettext-base git glslang-tools libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 reprepro unzip wget'
+    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates cmake curl debhelper devscripts dput-ng gettext-base git glslang-tools libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 unzip wayland-protocols wget'
+
+# Make Ubuntu noble image
+ubuntu:noble:container_prep:
+  stage: container_prep
+  extends:
+    - .container-rules
+    - .monado.variables.ubuntu:noble
+    - .fdo.container-build@ubuntu # from ci-templates
+
+  variables:
+    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates cmake curl debhelper devscripts dput-ng gettext-base git glslang-tools libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pkg-config python3 unzip wayland-protocols wget'
 
 # Make Arch image
 arch:container_prep:
@@ -236,6 +266,14 @@ alpine:container_prep:
 
 ###
 # Container usage base jobs
+
+# Base for using Debian bookworm image
+.monado.image.debian:bookworm:
+  extends:
+    - .monado.variables.debian:bookworm
+    - .fdo.distribution-image@debian # from ci-templates
+    - .build-rules
+
 
 # Base for using Debian bullseye image
 .monado.image.debian:bullseye:
@@ -269,6 +307,14 @@ alpine:container_prep:
     - .build-rules
 
 
+# Base for using Ubuntu noble image
+.monado.image.ubuntu:noble:
+  extends:
+    - .monado.variables.ubuntu:noble
+    - .fdo.distribution-image@ubuntu # from ci-templates
+    - .build-rules
+
+
 # Base for using Arch image
 .monado.image.arch:
   extends:
@@ -289,7 +335,7 @@ alpine:container_prep:
 # Style check job
 format-and-spellcheck:
   extends:
-    - .monado.image.debian:bullseye
+    - .monado.image.debian:bookworm
 
   stage: build
   script:
@@ -316,7 +362,8 @@ debian:cmake:
   stage: build
   extends:
     - .monado.packaging.conditions
-    - .monado.image.debian:bullseye
+    - .monado.image.debian:bookworm
+
   before_script:
     - pushd doc/changes
     - proclamation build vNEXT
@@ -334,7 +381,8 @@ debian:cmake:
 debian:cmake-no-opencv:
   stage: build
   extends:
-    - .monado.image.debian:bullseye
+    - .monado.image.debian:bookworm
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -344,7 +392,8 @@ debian:cmake-no-opencv:
 debian:cmake-no-sdl2:
   stage: build
   extends:
-    - .monado.image.debian:bullseye
+    - .monado.image.debian:bookworm
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -354,7 +403,8 @@ debian:cmake-no-sdl2:
 debian:cmake-no-service:
   stage: build
   extends:
-    - .monado.image.debian:bullseye
+    - .monado.image.debian:bookworm
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -364,17 +414,30 @@ debian:cmake-no-service:
 debian:cmake:32bit:
   stage: build
   extends:
-    - .monado.image.debian:bullseye
+    - .monado.image.debian:bookworm
+
   script:
 
     - .gitlab-ci/prebuild.sh
     - .gitlab-ci/ci-cmake-build.sh -DCMAKE_TOOLCHAIN_FILE=.gitlab-ci/i386.cmake -DXRT_HAVE_OPENCV=OFF
     - cd build && ctest --output-on-failure
 
+debian:bullseye:cmake:
+  stage: build
+  extends:
+    - .monado.image.debian:bullseye
+
+  script:
+
+    - .gitlab-ci/prebuild.sh
+    - .gitlab-ci/ci-cmake-build.sh
+    - cd build && ctest --output-on-failure
+
 ndk:armeabi-v7a:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -384,6 +447,7 @@ ndk:arm64-v8a:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -393,6 +457,7 @@ android:spotlessCheck:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+
   before_script:
     # For caching gradle stuff
     - export GRADLE_USER_HOME=`pwd`/.gradlehome
@@ -413,6 +478,7 @@ android:outOfProcessDebug:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+
   before_script:
     # For caching gradle stuff
     - export GRADLE_USER_HOME=`pwd`/.gradlehome
@@ -436,6 +502,7 @@ android:inProcessDebug:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+
   before_script:
     # For caching gradle stuff
     - export GRADLE_USER_HOME=`pwd`/.gradlehome
@@ -459,6 +526,8 @@ android:outOfProcessRelease:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+    - .monado.packaging.conditions
+
   before_script:
     # For caching gradle stuff
     - export GRADLE_USER_HOME=`pwd`/.gradlehome
@@ -473,6 +542,7 @@ android:outOfProcessRelease:
   script:
 
     - .gitlab-ci/prebuild.sh
+    - base64 --decode ${MONADO_ANDROID_KEYSTORE} > monado-release.jks
     - .gitlab-ci/ci-gradle-build.sh assembleOutOfProcessRelease
   artifacts:
     paths:
@@ -482,6 +552,8 @@ android:inProcessRelease:
   stage: build
   extends:
     - .monado.image.debian:bookworm-ndk
+    - .monado.packaging.conditions
+
   before_script:
     # For caching gradle stuff
     - export GRADLE_USER_HOME=`pwd`/.gradlehome
@@ -496,6 +568,7 @@ android:inProcessRelease:
   script:
 
     - .gitlab-ci/prebuild.sh
+    - base64 --decode ${MONADO_ANDROID_KEYSTORE} > monado-release.jks
     - .gitlab-ci/ci-gradle-build.sh assembleInProcessRelease
   artifacts:
     paths:
@@ -505,6 +578,7 @@ ubuntu:focal:cmake:
   stage: build
   extends:
     - .monado.image.ubuntu:focal
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -515,6 +589,18 @@ ubuntu:jammy:cmake:
   stage: build
   extends:
     - .monado.image.ubuntu:jammy
+
+  script:
+
+    - .gitlab-ci/prebuild.sh
+    - .gitlab-ci/ci-cmake-build.sh
+    - cd build && ctest --output-on-failure
+
+ubuntu:noble:cmake:
+  stage: build
+  extends:
+    - .monado.image.ubuntu:noble
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -525,6 +611,7 @@ arch:cmake:
   stage: build
   extends:
     - .monado.image.arch
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -535,6 +622,7 @@ arch:cmake:clang:
   stage: build
   extends:
     - .monado.image.arch
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -545,6 +633,7 @@ alpine:cmake:
   stage: build
   extends:
     - .monado.image.alpine
+
   script:
 
     - .gitlab-ci/prebuild.sh
@@ -565,6 +654,33 @@ windows:
       - build/Testing/Temporary
 
 
+
+debian:bookworm:package:
+  extends:
+    - .monado.image.debian:bookworm
+    - .monado.packaging.conditions
+  variables:
+    GIT_STRATEGY: clone
+    DEBFULLNAME: "Monado CI"
+    DEBEMAIL: "rylie.pavlik@collabora.com"
+    DISTRO: debian
+    CODENAME: bookworm
+    DEB_VERSION_SUFFIX: bpo12
+  stage: package
+  before_script:
+    - git config --global user.name Monado CI
+    - git config --global user.email rylie.pavlik@collabora.com
+  script:
+    - .gitlab-ci/prebuild.sh
+    # Prep the source tree
+    - git clean -dfx
+    # Call this script to build binary and source packages.
+    # Can try locally by exporting the right variables and passing -B to get only a binary package to avoid complaints.
+    - .gitlab-ci/build-and-submit-package.sh
+  artifacts:
+    paths:
+      - "incoming/"
+    expire_in: 2 days
 
 debian:bullseye:package:
   extends:
@@ -647,16 +763,45 @@ ubuntu:jammy:package:
       - "incoming/"
     expire_in: 2 days
 
+ubuntu:noble:package:
+  extends:
+    - .monado.image.ubuntu:noble
+    - .monado.packaging.conditions
+  variables:
+    GIT_STRATEGY: clone
+    DEBFULLNAME: "Monado CI"
+    DEBEMAIL: "rylie.pavlik@collabora.com"
+    DISTRO: ubuntu
+    CODENAME: noble
+    DEB_VERSION_SUFFIX: ubuntu2404
+  stage: package
+  before_script:
+    - git config --global user.name Monado CI
+    - git config --global user.email rylie.pavlik@collabora.com
+  script:
+    - .gitlab-ci/prebuild.sh
+    # Prep the source tree
+    - git clean -dfx
+    # Call this script to build binary and source packages.
+    # Can try locally by exporting the right variables and passing -B to get only a binary package to avoid complaints.
+    - .gitlab-ci/build-and-submit-package.sh
+  artifacts:
+    paths:
+      - "incoming/"
+    expire_in: 2 days
+
 reprepro:package:
   stage: reprepro
   extends:
-    - .monado.image.ubuntu:jammy
+    - .monado.image.debian:bookworm
 
     - .monado.packaging.conditions
   needs:
+    - debian:bookworm:package
     - debian:bullseye:package
     - ubuntu:focal:package
     - ubuntu:jammy:package
+    - ubuntu:noble:package
   script:
     - bash .gitlab-ci/reprepro.sh
   artifacts:

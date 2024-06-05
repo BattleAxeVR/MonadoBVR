@@ -130,7 +130,7 @@ select_extent(struct comp_target_swapchain *cts, VkSurfaceCapabilitiesKHR caps, 
 	/*
 	 * A sub-class wants us to use these extents over the ones the
 	 * compositor preferred, this is probably due to the target only
-	 * upporting this size so we better respect those wishes.
+	 * supporting this size so we better respect those wishes.
 	 */
 	if (cts->override.compositor_extent) {
 		preferred.width = cts->override.extent.width;
@@ -222,7 +222,7 @@ pick_first_matching_surface_format(const struct comp_target_create_images_info *
 		for (uint32_t k = 0; k < surface_format_count; k++) {
 			if (surface_formats[k].format == format) {
 				// Perfect match.
-				*out_surface_format = surface_formats[i];
+				*out_surface_format = surface_formats[k];
 				return true;
 			}
 		}

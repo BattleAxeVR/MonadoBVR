@@ -1,9 +1,10 @@
-// Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Shared internal defines and enums in the state tracker.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -25,6 +26,12 @@
 #define OXR_XR_DEBUG_SOURCESET (*(uint64_t *)"oxrsrcs\0")
 #define OXR_XR_DEBUG_SOURCE    (*(uint64_t *)"oxrsrc_\0")
 #define OXR_XR_DEBUG_HTRACKER  (*(uint64_t *)"oxrhtra\0")
+#define OXR_XR_DEBUG_PASSTHROUGH    	(*(uint64_t *)"oxrpass\0")
+#define OXR_XR_DEBUG_PASSTHROUGH_LAYER  (*(uint64_t *)"oxrptla\0")
+#define OXR_XR_DEBUG_FTRACKER  (*(uint64_t *)"oxrftra\0")
+// body tracker
+#define OXR_XR_DEBUG_BTRACKER  (*(uint64_t *)"oxrbtra\0")
+#define OXR_XR_DEBUG_XDEVLIST  (*(uint64_t *)"oxrxdli\0")
 // clang-format on
 
 /*!
@@ -102,6 +109,7 @@ enum oxr_space_type
 	OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML,
 
 	OXR_SPACE_TYPE_ACTION,
+	OXR_SPACE_TYPE_XDEV_POSE,
 };
 
 /*!

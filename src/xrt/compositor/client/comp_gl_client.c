@@ -229,55 +229,48 @@ client_gl_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_lay
 }
 
 static xrt_result_t
-client_gl_compositor_layer_stereo_projection(struct xrt_compositor *xc,
-                                             struct xrt_device *xdev,
-                                             struct xrt_swapchain *l_xsc,
-                                             struct xrt_swapchain *r_xsc,
-                                             const struct xrt_layer_data *data)
+client_gl_compositor_layer_projection(struct xrt_compositor *xc,
+                                      struct xrt_device *xdev,
+                                      struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                      const struct xrt_layer_data *data)
 {
 	struct xrt_compositor *xcn;
-	struct xrt_swapchain *l_xscn;
-	struct xrt_swapchain *r_xscn;
-
-	assert(data->type == XRT_LAYER_STEREO_PROJECTION);
+	struct xrt_swapchain *xscn[XRT_MAX_VIEWS];
 
 	xcn = to_native_compositor(xc);
-	l_xscn = to_native_swapchain(l_xsc);
-	r_xscn = to_native_swapchain(r_xsc);
-
+	assert(data->type == XRT_LAYER_PROJECTION);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xscn[i] = &client_gl_swapchain(xsc[i])->xscn->base;
+	}
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_stereo_projection(xcn, xdev, l_xscn, r_xscn, &d);
+	return xrt_comp_layer_projection(xcn, xdev, xscn, &d);
 }
 
 static xrt_result_t
-client_gl_compositor_layer_stereo_projection_depth(struct xrt_compositor *xc,
-                                                   struct xrt_device *xdev,
-                                                   struct xrt_swapchain *l_xsc,
-                                                   struct xrt_swapchain *r_xsc,
-                                                   struct xrt_swapchain *l_d_xsc,
-                                                   struct xrt_swapchain *r_d_xsc,
-                                                   const struct xrt_layer_data *data)
+client_gl_compositor_layer_projection_depth(struct xrt_compositor *xc,
+                                            struct xrt_device *xdev,
+                                            struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                            struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+                                            const struct xrt_layer_data *data)
 {
 	struct xrt_compositor *xcn;
-	struct xrt_swapchain *l_xscn;
-	struct xrt_swapchain *r_xscn;
-	struct xrt_swapchain *l_d_xscn;
-	struct xrt_swapchain *r_d_xscn;
+	struct xrt_swapchain *xscn[XRT_MAX_VIEWS];
+	struct xrt_swapchain *d_xscn[XRT_MAX_VIEWS];
 
-	assert(data->type == XRT_LAYER_STEREO_PROJECTION_DEPTH);
+	assert(data->type == XRT_LAYER_PROJECTION_DEPTH);
 
 	xcn = to_native_compositor(xc);
-	l_xscn = to_native_swapchain(l_xsc);
-	r_xscn = to_native_swapchain(r_xsc);
-	l_d_xscn = to_native_swapchain(l_d_xsc);
-	r_d_xscn = to_native_swapchain(r_d_xsc);
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xscn[i] = to_native_swapchain(xsc[i]);
+		d_xscn[i] = to_native_swapchain(d_xsc[i]);
+	}
 
 	struct xrt_layer_data d = *data;
 	d.flip_y = !d.flip_y;
 
-	return xrt_comp_layer_stereo_projection_depth(xcn, xdev, l_xscn, r_xscn, l_d_xscn, r_d_xscn, &d);
+	return xrt_comp_layer_projection_depth(xcn, xdev, xscn, d_xscn, &d);
 }
 
 static xrt_result_t
@@ -378,6 +371,21 @@ client_gl_compositor_layer_equirect2(struct xrt_compositor *xc,
 	d.flip_y = !d.flip_y;
 
 	return xrt_comp_layer_equirect2(xcn, xdev, xscfb, &d);
+}
+
+static xrt_result_t
+client_gl_compositor_layer_passthrough(struct xrt_compositor *xc,
+                                       struct xrt_device *xdev,
+                                       const struct xrt_layer_data *data)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	assert(data->type == XRT_LAYER_PASSTHROUGH);
+
+	struct xrt_layer_data d = *data;
+	d.flip_y = !d.flip_y;
+
+	return xrt_comp_layer_passthrough(&c->xcn->base, xdev, &d);
 }
 
 static xrt_result_t
@@ -529,6 +537,34 @@ client_gl_swapchain_create(struct xrt_compositor *xc,
 	return XRT_SUCCESS;
 }
 
+static xrt_result_t
+client_gl_compositor_passthrough_create(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_create_passthrough(&c->xcn->base, info);
+}
+
+static xrt_result_t
+client_gl_compositor_passthrough_layer_create(struct xrt_compositor *xc,
+                                              const struct xrt_passthrough_layer_create_info *info)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_create_passthrough_layer(&c->xcn->base, info);
+}
+
+static xrt_result_t
+client_gl_compositor_passthrough_destroy(struct xrt_compositor *xc)
+{
+	struct client_gl_compositor *c = client_gl_compositor(xc);
+
+	// Pipe down call into native compositor.
+	return xrt_comp_destroy_passthrough(&c->xcn->base);
+}
+
 static void
 client_gl_compositor_destroy(struct xrt_compositor *xc)
 {
@@ -561,19 +597,23 @@ client_gl_compositor_init(struct client_gl_compositor *c,
 
 	c->base.base.get_swapchain_create_properties = client_gl_compositor_get_swapchain_create_properties;
 	c->base.base.create_swapchain = client_gl_swapchain_create;
+	c->base.base.create_passthrough = client_gl_compositor_passthrough_create;
+	c->base.base.create_passthrough_layer = client_gl_compositor_passthrough_layer_create;
+	c->base.base.destroy_passthrough = client_gl_compositor_passthrough_destroy;
 	c->base.base.begin_session = client_gl_compositor_begin_session;
 	c->base.base.end_session = client_gl_compositor_end_session;
 	c->base.base.wait_frame = client_gl_compositor_wait_frame;
 	c->base.base.begin_frame = client_gl_compositor_begin_frame;
 	c->base.base.discard_frame = client_gl_compositor_discard_frame;
 	c->base.base.layer_begin = client_gl_compositor_layer_begin;
-	c->base.base.layer_stereo_projection = client_gl_compositor_layer_stereo_projection;
-	c->base.base.layer_stereo_projection_depth = client_gl_compositor_layer_stereo_projection_depth;
+	c->base.base.layer_projection = client_gl_compositor_layer_projection;
+	c->base.base.layer_projection_depth = client_gl_compositor_layer_projection_depth;
 	c->base.base.layer_quad = client_gl_compositor_layer_quad;
 	c->base.base.layer_cube = client_gl_compositor_layer_cube;
 	c->base.base.layer_cylinder = client_gl_compositor_layer_cylinder;
 	c->base.base.layer_equirect1 = client_gl_compositor_layer_equirect1;
 	c->base.base.layer_equirect2 = client_gl_compositor_layer_equirect2;
+	c->base.base.layer_passthrough = client_gl_compositor_layer_passthrough;
 	c->base.base.layer_commit = client_gl_compositor_layer_commit;
 	c->base.base.destroy = client_gl_compositor_destroy;
 	c->context_begin_locked = context_begin_locked;

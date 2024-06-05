@@ -1,4 +1,4 @@
-// Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -29,6 +29,7 @@
 #include "util/u_debug.h"
 #include "util/u_misc.h"
 #include "util/u_time.h"
+#include "util/u_visibility_mask.h"
 #include "util/u_verify.h"
 
 #include "math/m_api.h"
@@ -209,7 +210,8 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 	if (xc != NULL) {
 		XrViewConfigurationType view_type = beginInfo->primaryViewConfigurationType;
 
-		if (view_type != sess->sys->view_config_type) {
+		// in a headless session there is no compositor and primaryViewConfigurationType must be ignored
+		if (sess->compositor != NULL && view_type != sess->sys->view_config_type) {
 			/*! @todo we only support a single view config type per
 			 * system right now */
 			return oxr_error(log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
@@ -228,6 +230,12 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 #endif
 #ifdef OXR_HAVE_EXT_hand_interaction
 		    .ext_hand_interaction_enabled = extensions->EXT_hand_interaction,
+#endif
+#ifdef OXR_HAVE_HTC_facial_tracking
+		    .htc_facial_tracking_enabled = extensions->HTC_facial_tracking,
+#endif
+#ifdef OXR_HAVE_FB_body_tracking
+		    .fb_body_tracking_enabled = extensions->FB_body_tracking,
 #endif
 		};
 
@@ -314,6 +322,27 @@ oxr_session_request_exit(struct oxr_logger *log, struct oxr_session *sess)
 	return oxr_session_success_result(sess);
 }
 
+#ifdef OXR_HAVE_FB_passthrough
+static inline XrPassthroughStateChangedFlagsFB
+xrt_to_passthrough_state_flags(enum xrt_passthrough_state state)
+{
+	XrPassthroughStateChangedFlagsFB res = 0;
+	if (state & XRT_PASSTHROUGH_STATE_CHANGED_REINIT_REQUIRED_BIT) {
+		res |= XR_PASSTHROUGH_STATE_CHANGED_REINIT_REQUIRED_BIT_FB;
+	}
+	if (state & XRT_PASSTHROUGH_STATE_CHANGED_NON_RECOVERABLE_ERROR_BIT) {
+		res |= XR_PASSTHROUGH_STATE_CHANGED_NON_RECOVERABLE_ERROR_BIT_FB;
+	}
+	if (state & XRT_PASSTHROUGH_STATE_CHANGED_RECOVERABLE_ERROR_BIT) {
+		res |= XR_PASSTHROUGH_STATE_CHANGED_RECOVERABLE_ERROR_BIT_FB;
+	}
+	if (state & XRT_PASSTHROUGH_STATE_CHANGED_RESTORED_ERROR_BIT) {
+		res |= XR_PASSTHROUGH_STATE_CHANGED_RESTORED_ERROR_BIT_FB;
+	}
+	return res;
+}
+#endif
+
 XrResult
 oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 {
@@ -370,6 +399,18 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 			    xse.performance.to_level);
 #endif // OXR_HAVE_EXT_performance_settings
 			break;
+		case XRT_SESSION_EVENT_PASSTHRU_STATE_CHANGE:
+#ifdef OXR_HAVE_FB_passthrough
+			oxr_event_push_XrEventDataPassthroughStateChangedFB(
+			    log, sess, xrt_to_passthrough_state_flags(xse.passthru.state));
+#endif // OXR_HAVE_FB_passthrough
+			break;
+		case XRT_SESSION_EVENT_VISIBILITY_MASK_CHANGE:
+#ifdef OXR_HAVE_KHR_visibility_mask
+			oxr_event_push_XrEventDataVisibilityMaskChangedKHR(log, sess, sess->sys->view_config_type,
+			                                                   xse.mask_change.view_index);
+#endif // OXR_HAVE_KHR_visibility_mask
+			break;
 		default: U_LOG_W("unhandled event type! %d", xse.type); break;
 		}
 	}
@@ -425,7 +466,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 	bool print = sess->sys->inst->debug_views;
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, head);
 	struct oxr_space *baseSpc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, viewLocateInfo->space);
-	uint32_t view_count = 2;
+	uint32_t view_count = xdev->hmd->view_count;
 
 	// Start two call handling.
 	if (viewCountOutput != NULL) {
@@ -461,14 +502,14 @@ oxr_session_locate_views(struct oxr_logger *log,
 
 	// The head pose as in the xdev's space, aka XRT_INPUT_GENERIC_HEAD_POSE.
 	struct xrt_space_relation T_xdev_head = XRT_SPACE_RELATION_ZERO;
-	struct xrt_fov fovs[2] = {0};
-	struct xrt_pose poses[2] = {0};
+	struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
+	struct xrt_pose poses[XRT_MAX_VIEWS] = {0};
 
 	xrt_device_get_view_poses( //
 	    xdev,                  //
 	    &default_eye_relation, //
 	    xdisplay_time,         //
-	    2,                     //
+	    view_count,            //
 	    &T_xdev_head,          //
 	    fovs,                  //
 	    poses);
@@ -1236,6 +1277,42 @@ oxr_session_hand_joints(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
+/*
+ * Gets the body pose in the base space.
+ */
+XrResult
+oxr_get_base_body_pose(struct oxr_logger *log,
+                       const struct xrt_body_joint_set *body_joint_set,
+                       struct oxr_space *base_spc,
+                       struct xrt_device *body_xdev,
+                       XrTime at_time,
+                       struct xrt_space_relation *out_base_body)
+{
+	const struct xrt_space_relation space_relation_zero = XRT_SPACE_RELATION_ZERO;
+	*out_base_body = space_relation_zero;
+
+	// The body pose is returned in the xdev's space.
+	const struct xrt_space_relation *T_xdev_body = &body_joint_set->body_pose;
+
+	// Get the xdev's pose in the base space.
+	struct xrt_space_relation T_base_xdev = XRT_SPACE_RELATION_ZERO;
+
+	XrResult ret = oxr_space_locate_device(log, body_xdev, base_spc, at_time, &T_base_xdev);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+	if (T_base_xdev.relation_flags == 0) {
+		return XR_SUCCESS;
+	}
+
+	struct xrt_relation_chain xrc = {0};
+	m_relation_chain_push_relation(&xrc, T_xdev_body);
+	m_relation_chain_push_relation(&xrc, &T_base_xdev);
+	m_relation_chain_resolve(&xrc, out_base_body);
+
+	return XR_SUCCESS;
+}
+
 static enum xrt_output_name
 xr_hand_to_force_feedback_output(XrHandEXT hand)
 {
@@ -1342,6 +1419,11 @@ oxr_session_get_visibility_mask(struct oxr_logger *log,
 	// If we didn't have any cached mask get it.
 	if (mask == NULL) {
 		xret = xrt_device_get_visibility_mask(xdev, type, viewIndex, &mask);
+		if (xret == XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED && xdev->hmd != NULL) {
+			const struct xrt_fov fov = xdev->hmd->distortion.fov[viewIndex];
+			u_visibility_mask_get_default(type, &fov, &mask);
+			xret = XRT_SUCCESS;
+		}
 		OXR_CHECK_XRET(log, sess, xret, get_visibility_mask);
 		sys->visibility_mask[viewIndex] = mask;
 	}

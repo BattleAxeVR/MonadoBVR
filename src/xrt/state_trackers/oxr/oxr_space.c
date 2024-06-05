@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -23,6 +23,7 @@
 #include "oxr_chain.h"
 #include "oxr_pretty_print.h"
 #include "oxr_conversions.h"
+#include "oxr_xret.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,6 +91,7 @@ get_xrt_space(struct oxr_logger *log, struct oxr_space *spc, struct xrt_space **
 	struct xrt_space *xspace = NULL;
 	switch (spc->space_type) {
 	case OXR_SPACE_TYPE_ACTION: return get_xrt_space_action(log, spc, out_xspace);
+	case OXR_SPACE_TYPE_XDEV_POSE: xspace = spc->xdev_pose.xs; break;
 	case OXR_SPACE_TYPE_REFERENCE_VIEW: xspace = spc->sess->sys->xso->semantic.view; break;
 	case OXR_SPACE_TYPE_REFERENCE_LOCAL: xspace = spc->sess->sys->xso->semantic.local; break;
 	case OXR_SPACE_TYPE_REFERENCE_LOCAL_FLOOR: xspace = spc->sess->sys->xso->semantic.local_floor; break;
@@ -126,6 +128,7 @@ oxr_space_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 		xrt_space_overseer_ref_space_dec(spc->sess->sys->xso, xtype);
 	}
 
+	xrt_space_reference(&spc->xdev_pose.xs, NULL);
 	xrt_space_reference(&spc->action.xs, NULL);
 	spc->action.xdev = NULL;
 	spc->action.name = 0;
@@ -162,6 +165,25 @@ oxr_space_action_create(struct oxr_logger *log,
 }
 
 XrResult
+oxr_space_get_reference_bounds_rect(struct oxr_logger *log,
+                                    struct oxr_session *sess,
+                                    XrReferenceSpaceType referenceSpaceType,
+                                    XrExtent2Df *bounds)
+{
+	struct xrt_compositor *xc = &sess->xcn->base;
+
+	enum xrt_reference_space_type reference_space_type = xr_ref_space_to_xrt(referenceSpaceType);
+
+	xrt_result_t xret = xrt_comp_get_reference_bounds_rect(xc, reference_space_type, (struct xrt_vec2 *)bounds);
+	if (xret == XRT_ERROR_COMPOSITOR_FUNCTION_NOT_IMPLEMENTED || xret == XRT_SPACE_BOUNDS_UNAVAILABLE) {
+		return XR_SPACE_BOUNDS_UNAVAILABLE;
+	}
+	OXR_CHECK_XRET(log, sess, xret, oxr_space_get_reference_bounds_rect);
+
+	return oxr_session_success_result(sess);
+}
+
+XrResult
 oxr_space_reference_create(struct oxr_logger *log,
                            struct oxr_session *sess,
                            const XrReferenceSpaceCreateInfo *createInfo,
@@ -191,12 +213,215 @@ oxr_space_reference_create(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
+XrResult
+oxr_space_xdev_pose_create(struct oxr_logger *log,
+                           struct oxr_session *sess,
+                           struct xrt_device *xdev,
+                           enum xrt_input_name name,
+                           const struct xrt_pose *pose,
+                           struct oxr_space **out_space)
+{
+	if (!math_pose_validate(pose)) {
+		return oxr_error(log, XR_ERROR_POSE_INVALID, "(createInfo->offset)");
+	}
+
+	struct xrt_space *xspace = NULL;
+	xrt_result_t xret = xrt_space_overseer_create_pose_space( //
+	    sess->sys->xso,                                       //
+	    xdev,                                                 //
+	    name,                                                 //
+	    &xspace);                                             //
+	OXR_CHECK_XRET(log, sess, xret, xrt_space_overseer_create_pose_space);
+
+	struct oxr_space *spc = NULL;
+	OXR_ALLOCATE_HANDLE_OR_RETURN(log, spc, OXR_XR_DEBUG_SPACE, oxr_space_destroy, &sess->handle);
+	spc->sess = sess;
+	spc->pose = *pose;
+	spc->space_type = OXR_SPACE_TYPE_XDEV_POSE;
+	xrt_space_reference(&spc->xdev_pose.xs, xspace);
+	xrt_space_reference(&xspace, NULL);
+
+	*out_space = spc;
+
+	return XR_SUCCESS;
+}
+
 
 /*
  *
  * OpenXR API functions.
  *
  */
+
+static void
+free_spaces(struct xrt_space ***xtargets, struct xrt_pose **offsets, struct xrt_space_relation **results)
+{
+	free(*xtargets);
+	*xtargets = NULL;
+
+	free(*offsets);
+	*offsets = NULL;
+
+	free(*results);
+	*results = NULL;
+}
+
+XrResult
+oxr_spaces_locate(struct oxr_logger *log,
+                  struct oxr_space **spcs,
+                  uint32_t spc_count,
+                  struct oxr_space *baseSpc,
+                  XrTime time,
+                  XrSpaceLocations *locations)
+{
+	struct oxr_sink_logger slog = {0};
+	struct oxr_system *sys = baseSpc->sess->sys;
+	bool print = sys->inst->debug_spaces;
+	if (print) {
+		for (uint32_t i = 0; i < spc_count; i++) {
+			oxr_pp_space_indented(&slog, spcs[i], "space");
+		}
+		oxr_pp_space_indented(&slog, baseSpc, "baseSpace");
+	}
+
+	// Used in a lot of places.
+	XrSpaceVelocitiesKHR *vels =
+	    OXR_GET_OUTPUT_FROM_CHAIN(locations->next, XR_TYPE_SPACE_VELOCITIES_KHR, XrSpaceVelocitiesKHR);
+
+	// XrEyeGazeSampleTimeEXT can not be chained anywhere in xrLocateSpaces
+
+	/*
+	 * Seek knowledge about the spaces from the space overseer.
+	 */
+
+	struct xrt_space *xbase = NULL;
+
+	struct xrt_space **xspcs = U_TYPED_ARRAY_CALLOC(struct xrt_space *, spc_count);
+	struct xrt_pose *offsets = U_TYPED_ARRAY_CALLOC(struct xrt_pose, spc_count);
+
+
+	XrResult ret = XR_SUCCESS;
+
+	for (uint32_t i = 0; i < spc_count; i++) {
+		// Once we hit an error, we don't need to continue. Also make sure to not overwrite the error.
+		if (ret != XR_SUCCESS) {
+			break;
+		}
+		struct xrt_space *xt = NULL;
+		ret = get_xrt_space(log, spcs[i], &xt);
+		xspcs[i] = xt;
+		offsets[i] = spcs[i]->pose;
+	}
+
+	// Make sure not to overwrite error return
+	if (ret == XR_SUCCESS) {
+		ret = get_xrt_space(log, baseSpc, &xbase);
+	}
+
+	// Only fill this out if the above succeeded. Zero initialized means relation flags == 0.
+	struct xrt_space_relation *results = U_TYPED_ARRAY_CALLOC(struct xrt_space_relation, spc_count);
+
+	if (ret == XR_SUCCESS) {
+		// Convert at_time to monotonic and give to device.
+		uint64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(sys->inst->timekeeping, time);
+
+		// Ask the space overseer to locate the spaces.
+		enum xrt_result xret = xrt_space_overseer_locate_spaces( //
+		    sys->xso,                                            //
+		    xbase,                                               //
+		    &baseSpc->pose,                                      //
+		    at_timestamp_ns,                                     //
+		    xspcs,                                               //
+		    spc_count,                                           //
+		    offsets,                                             //
+		    results);                                            //
+		if (xret != XRT_SUCCESS) {
+			//! @todo  results locationFlags should still be 0. But should this hard fail? goto "Print"?
+			oxr_warn(log, "Failed to locate spaces (%d)", xret);
+
+			if (xret != XRT_SUCCESS) {
+				ret = XR_ERROR_RUNTIME_FAILURE;
+
+				if (xret == XRT_ERROR_ALLOCATION) {
+					//! @todo spec: function not specified to return out of memory
+					// ret = XR_ERROR_OUT_OF_MEMORY;
+				}
+			}
+		}
+	}
+
+	/*
+	 * Validate results
+	 */
+
+	for (uint32_t i = 0; i < spc_count; i++) {
+		if (results[i].relation_flags == XRT_SPACE_RELATION_BITMASK_NONE) {
+			locations->locations[i].locationFlags = 0;
+
+			OXR_XRT_POSE_TO_XRPOSEF(XRT_POSE_IDENTITY, locations->locations[i].pose);
+
+			if (vels) {
+				vels->velocities[i].velocityFlags = 0;
+				U_ZERO(&vels->velocities[i].linearVelocity);
+				U_ZERO(&vels->velocities[i].angularVelocity);
+			}
+
+			oxr_slog(&slog, "\n\tReturning invalid pose locations->locations[%d]", i);
+		} else {
+
+			/*
+			 * Combine and copy
+			 */
+
+			OXR_XRT_POSE_TO_XRPOSEF(results[i].pose, locations->locations[i].pose);
+			locations->locations[i].locationFlags =
+			    xrt_to_xr_space_location_flags(results[i].relation_flags);
+
+			if (vels) {
+				vels->velocities[i].velocityFlags = 0;
+				if ((results[i].relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
+					vels->velocities[i].linearVelocity.x = results[i].linear_velocity.x;
+					vels->velocities[i].linearVelocity.y = results[i].linear_velocity.y;
+					vels->velocities[i].linearVelocity.z = results[i].linear_velocity.z;
+					vels->velocities[i].velocityFlags |= XR_SPACE_VELOCITY_LINEAR_VALID_BIT;
+				} else {
+					U_ZERO(&vels->velocities[i].linearVelocity);
+				}
+
+				if ((results[i].relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) != 0) {
+					vels->velocities[i].angularVelocity.x = results[i].angular_velocity.x;
+					vels->velocities[i].angularVelocity.y = results[i].angular_velocity.y;
+					vels->velocities[i].angularVelocity.z = results[i].angular_velocity.z;
+					vels->velocities[i].velocityFlags |= XR_SPACE_VELOCITY_ANGULAR_VALID_BIT;
+				} else {
+					U_ZERO(&vels->velocities[i].angularVelocity);
+				}
+			}
+
+			oxr_pp_relation_indented(&slog, &results[i], "relation");
+		}
+	}
+
+
+	/*
+	 * Print
+	 */
+
+	if (print) {
+		oxr_log_slog(log, &slog);
+	} else {
+		oxr_slog_cancel(&slog);
+	}
+
+	free_spaces(&xspcs, &offsets, &results);
+
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	// all spaces must be on the same session
+	return oxr_session_success_result(baseSpc->sess);
+}
 
 XrResult
 oxr_space_locate(

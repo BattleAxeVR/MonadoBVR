@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CC0-1.0
-# SPDX-FileCopyrightText: 2018-2023 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2018-2024 Collabora, Ltd. and the Monado contributors
 
 {# ignore the warning, this is actually the template to edit. #}
 ###############################################
@@ -55,12 +55,8 @@ stages:
 # Extra rules for packaging
 .monado.packaging.conditions:
   rules:
-    # Only the default branch of the "upstream" repo.
-    - if: "$CI_PROJECT_PATH == $FDO_UPSTREAM_REPO && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH"
-      when: on_success
-    # Otherwise, don't build packages.
-    - when: never
-
+    # Only the default branch of the "upstream" repo on push.
+    - if: $CI_PROJECT_PATH == $FDO_UPSTREAM_REPO && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
 
 {% include 'include.win_containers.yml' %}
 {% include 'include.ci-containers-variables.yml.jinja' %}
@@ -108,6 +104,9 @@ reuse:
     - .monado.packaging.conditions
 {% endif %}
     - {{base_job_to_use_image(distro, image)}}
+{% if job.extra_extends %}
+    - {{ job.extra_extends }}
+{% endif %}
 
 {%- if job.before_script or "android" in job.name %}
 
@@ -140,6 +139,9 @@ reuse:
 {#- gradle builds -#}
 {%- elif "android" in job.name %}
 
+{% if "Release" in job.name %}
+    - base64 --decode ${MONADO_ANDROID_KEYSTORE} > monado-release.jks
+{% endif %}
     - .gitlab-ci/ci-gradle-build.sh {{ job.target }}
 
 {%- else %}

@@ -1,4 +1,4 @@
-// Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,6 +6,7 @@
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup ipc_server
  */
 
@@ -352,14 +353,18 @@ init_shm(struct ipc_server *s)
 		isdev->force_feedback_supported = xdev->force_feedback_supported;
 		isdev->form_factor_check_supported = xdev->form_factor_check_supported;
 		isdev->eye_gaze_supported = xdev->eye_gaze_supported;
+		isdev->face_tracking_supported = xdev->face_tracking_supported;
+		isdev->body_tracking_supported = xdev->body_tracking_supported;
 		isdev->stage_supported = xdev->stage_supported;
 
 		// Is this a HMD?
 		if (xdev->hmd != NULL) {
-			ism->hmd.views[0].display.w_pixels = xdev->hmd->views[0].display.w_pixels;
-			ism->hmd.views[0].display.h_pixels = xdev->hmd->views[0].display.h_pixels;
-			ism->hmd.views[1].display.w_pixels = xdev->hmd->views[1].display.w_pixels;
-			ism->hmd.views[1].display.h_pixels = xdev->hmd->views[1].display.h_pixels;
+			// set view count
+			ism->hmd.view_count = xdev->hmd->view_count;
+			for (uint32_t view = 0; view < xdev->hmd->view_count; ++view) {
+				ism->hmd.views[view].display.w_pixels = xdev->hmd->views[view].display.w_pixels;
+				ism->hmd.views[view].display.h_pixels = xdev->hmd->views[view].display.h_pixels;
+			}
 
 			for (size_t i = 0; i < xdev->hmd->blend_mode_count; i++) {
 				// Not super necessary, we also do this assert in oxr_system.c
@@ -429,6 +434,8 @@ init_shm(struct ipc_server *s)
 	// Assign all of the roles.
 	ism->roles.head = find_xdev_index(s, s->xsysd->static_roles.head);
 	ism->roles.eyes = find_xdev_index(s, s->xsysd->static_roles.eyes);
+	ism->roles.face = find_xdev_index(s, s->xsysd->static_roles.face);
+	ism->roles.body = find_xdev_index(s, s->xsysd->static_roles.body);
 	ism->roles.hand_tracking.left = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.left);
 	ism->roles.hand_tracking.right = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.right);
 
@@ -963,6 +970,13 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 
 	// Unlock when we are done.
 	os_mutex_unlock(&vs->global_state.lock);
+}
+
+xrt_result_t
+ipc_server_get_system_properties(struct ipc_server *vs, struct xrt_system_properties *out_properties)
+{
+	memcpy(out_properties, &vs->xsys->properties, sizeof(*out_properties));
+	return XRT_SUCCESS;
 }
 
 #ifndef XRT_OS_ANDROID

@@ -1,10 +1,11 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  File for negotiating with the loader.
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -143,6 +144,19 @@ oxr_xrEnumerateApiLayerProperties(uint32_t propertyCapacityInput,
  */
 #define ENTRY_IF_EXT(funcName, short_ext_name)                                                                         \
 	ENTRY_IF(funcName, inst->extensions.short_ext_name, "Required extension XR_" #short_ext_name " not enabled")
+
+/*!
+ * @brief Helper define for generating that GetInstanceProcAddr function for
+ * functions that have been promoted to core in some OpenXR version.
+ *
+ * Wraps ENTRY_IF for the common case.
+ *
+ * Pass the function name and the OpenXR version the function has first been available in core.
+ */
+#define ENTRY_IF_VERSION_AT_LEAST(funcName, major, minor)                                                              \
+	ENTRY_IF(funcName, (inst->openxr_version.major_minor >= XR_MAKE_VERSION(major, minor, 0)),                     \
+	         ("OpenXR version must be at least %d.%d.x", major, minor))
+
 /*!
  * Handle a non-null instance pointer.
  */
@@ -246,6 +260,21 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrRequestDisplayRefreshRateFB, FB_display_refresh_rate);
 #endif
 
+#ifdef OXR_HAVE_FB_passthrough
+	ENTRY_IF_EXT(xrCreateGeometryInstanceFB, FB_passthrough);
+	ENTRY_IF_EXT(xrCreatePassthroughFB, FB_passthrough);
+	ENTRY_IF_EXT(xrCreatePassthroughLayerFB, FB_passthrough);
+	ENTRY_IF_EXT(xrDestroyGeometryInstanceFB, FB_passthrough);
+	ENTRY_IF_EXT(xrDestroyPassthroughFB, FB_passthrough);
+	ENTRY_IF_EXT(xrDestroyPassthroughLayerFB, FB_passthrough);
+	ENTRY_IF_EXT(xrGeometryInstanceSetTransformFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughLayerPauseFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughLayerResumeFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughLayerSetStyleFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughPauseFB, FB_passthrough);
+	ENTRY_IF_EXT(xrPassthroughStartFB, FB_passthrough);
+#endif // OXR_HAVE_FB_passthrough
+
 #ifdef OXR_HAVE_EXT_debug_utils
 	ENTRY_IF_EXT(xrSetDebugUtilsObjectNameEXT, EXT_debug_utils);
 	ENTRY_IF_EXT(xrCreateDebugUtilsMessengerEXT, EXT_debug_utils);
@@ -289,6 +318,34 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 #ifdef OXR_HAVE_KHR_D3D12_enable
 	ENTRY_IF_EXT(xrGetD3D12GraphicsRequirementsKHR, KHR_D3D12_enable);
 #endif // OXR_HAVE_KHR_D3D12_enable
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+	ENTRY_IF_EXT(xrCreateFacialTrackerHTC, HTC_facial_tracking);
+	ENTRY_IF_EXT(xrDestroyFacialTrackerHTC, HTC_facial_tracking);
+	ENTRY_IF_EXT(xrGetFacialExpressionsHTC, HTC_facial_tracking);
+#endif
+
+#ifdef OXR_HAVE_FB_body_tracking
+	ENTRY_IF_EXT(xrCreateBodyTrackerFB, FB_body_tracking);
+	ENTRY_IF_EXT(xrDestroyBodyTrackerFB, FB_body_tracking);
+	ENTRY_IF_EXT(xrGetBodySkeletonFB, FB_body_tracking);
+	ENTRY_IF_EXT(xrLocateBodyJointsFB, FB_body_tracking);
+#endif
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+	ENTRY_IF_EXT(xrCreateXDevListMNDX, MNDX_xdev_space);
+	ENTRY_IF_EXT(xrGetXDevListGenerationNumberMNDX, MNDX_xdev_space);
+	ENTRY_IF_EXT(xrEnumerateXDevsMNDX, MNDX_xdev_space);
+	ENTRY_IF_EXT(xrGetXDevPropertiesMNDX, MNDX_xdev_space);
+	ENTRY_IF_EXT(xrDestroyXDevListMNDX, MNDX_xdev_space);
+	ENTRY_IF_EXT(xrCreateXDevSpaceMNDX, MNDX_xdev_space);
+#endif // OXR_HAVE_MNDX_xdev_space
+
+#ifdef OXR_HAVE_KHR_locate_spaces
+	ENTRY_IF_EXT(xrLocateSpacesKHR, KHR_locate_spaces);
+#endif
+
+	ENTRY_IF_VERSION_AT_LEAST(xrLocateSpaces, 1, 1);
 
 	/*
 	 * Not logging here because there's no need to loudly advertise

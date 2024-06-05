@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -176,6 +176,28 @@
 #define OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_) _(KHR_loader_init_android, KHR_LOADER_INIT_ANDROID)
 #else
 #define OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_)
+#endif
+
+
+/*
+ * XR_KHR_locate_spaces
+ */
+#if defined(XR_KHR_locate_spaces)
+#define OXR_HAVE_KHR_locate_spaces
+#define OXR_EXTENSION_SUPPORT_KHR_locate_spaces(_) _(KHR_locate_spaces, KHR_LOCATE_SPACES)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_locate_spaces(_)
+#endif
+
+
+/*
+ * XR_KHR_maintenance1
+ */
+#if defined(XR_KHR_maintenance1)
+#define OXR_HAVE_KHR_maintenance1
+#define OXR_EXTENSION_SUPPORT_KHR_maintenance1(_) _(KHR_maintenance1, KHR_MAINTENANCE1)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_maintenance1(_)
 #endif
 
 
@@ -384,6 +406,28 @@
 
 
 /*
+ * XR_BD_controller_interaction
+ */
+#if defined(XR_BD_controller_interaction) && defined(XRT_FEATURE_OPENXR_INTERACTION_BYTEDANCE)
+#define OXR_HAVE_BD_controller_interaction
+#define OXR_EXTENSION_SUPPORT_BD_controller_interaction(_) _(BD_controller_interaction, BD_CONTROLLER_INTERACTION)
+#else
+#define OXR_EXTENSION_SUPPORT_BD_controller_interaction(_)
+#endif
+
+
+/*
+ * XR_FB_body_tracking
+ */
+#if defined(XR_FB_body_tracking) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FB)
+#define OXR_HAVE_FB_body_tracking
+#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_) _(FB_body_tracking, FB_BODY_TRACKING)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
+#endif
+
+
+/*
  * XR_FB_composition_layer_alpha_blend
  */
 #if defined(XR_FB_composition_layer_alpha_blend) && defined(XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND)
@@ -418,6 +462,7 @@
 #define OXR_EXTENSION_SUPPORT_FB_composition_layer_settings(_)
 #endif
 
+
 /*
  * XR_FB_composition_layer_depth_test
  */
@@ -429,6 +474,7 @@
 #define OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_)
 #endif
 
+
 /*
  * XR_FB_display_refresh_rate
  */
@@ -437,6 +483,62 @@
 #define OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_) _(FB_display_refresh_rate, FB_DISPLAY_REFRESH_RATE)
 #else
 #define OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_)
+#endif
+
+
+/*
+ * XR_FB_passthrough
+ */
+#if defined(XR_FB_passthrough) && defined(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+#define OXR_HAVE_FB_passthrough
+#define OXR_EXTENSION_SUPPORT_FB_passthrough(_) _(FB_passthrough, FB_PASSTHROUGH)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_passthrough(_)
+#endif
+
+
+/*
+ * XR_FB_touch_controller_pro
+ */
+#if defined(XR_FB_touch_controller_pro) && defined(XRT_FEATURE_OPENXR_INTERACTION_TOUCH_PRO)
+#define OXR_HAVE_FB_touch_controller_pro
+#define OXR_EXTENSION_SUPPORT_FB_touch_controller_pro(_) _(FB_touch_controller_pro, FB_TOUCH_CONTROLLER_PRO)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_touch_controller_pro(_)
+#endif
+
+
+/*
+ * XR_FB_touch_controller_proximity
+ */
+#if defined(XR_FB_touch_controller_proximity) && defined(XRT_FEATURE_OPENXR_INTERACTION_FB_PROXIMITY)
+#define OXR_HAVE_FB_touch_controller_proximity
+#define OXR_EXTENSION_SUPPORT_FB_touch_controller_proximity(_)                                                         \
+	_(FB_touch_controller_proximity, FB_TOUCH_CONTROLLER_PROXIMITY)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_touch_controller_proximity(_)
+#endif
+
+
+/*
+ * XR_HTC_facial_tracking
+ */
+#if defined(XR_HTC_facial_tracking) && defined(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC)
+#define OXR_HAVE_HTC_facial_tracking
+#define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) _(HTC_facial_tracking, HTC_FACIAL_TRACKING)
+#else
+#define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_)
+#endif
+
+
+/*
+ * XR_META_touch_controller_plus
+ */
+#if defined(XR_META_touch_controller_plus) && defined(XRT_FEATURE_OPENXR_INTERACTION_TOUCH_PLUS)
+#define OXR_HAVE_META_touch_controller_plus
+#define OXR_EXTENSION_SUPPORT_META_touch_controller_plus(_) _(META_touch_controller_plus, META_TOUCH_CONTROLLER_PLUS)
+#else
+#define OXR_EXTENSION_SUPPORT_META_touch_controller_plus(_)
 #endif
 
 
@@ -533,6 +635,30 @@
 
 
 /*
+ * XR_HTC_vive_cosmos_controller_interaction
+ */
+#if defined(XR_HTC_vive_cosmos_controller_interaction) && defined(XRT_FEATURE_OPENXR_INTERACTION_VIVE_COSMOS)
+#define OXR_HAVE_HTC_vive_cosmos_controller_interaction
+#define OXR_EXTENSION_SUPPORT_HTC_vive_cosmos_controller_interaction(_)                                                \
+	_(HTC_vive_cosmos_controller_interaction, HTC_VIVE_COSMOS_CONTROLLER_INTERACTION)
+#else
+#define OXR_EXTENSION_SUPPORT_HTC_vive_cosmos_controller_interaction(_)
+#endif
+
+
+/*
+ * XR_HTC_vive_focus3_controller_interaction
+ */
+#if defined(XR_HTC_vive_focus3_controller_interaction) && defined(XRT_FEATURE_OPENXR_INTERACTION_VIVE_FOCUS3)
+#define OXR_HAVE_HTC_vive_focus3_controller_interaction
+#define OXR_EXTENSION_SUPPORT_HTC_vive_focus3_controller_interaction(_)                                                \
+	_(HTC_vive_focus3_controller_interaction, HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION)
+#else
+#define OXR_EXTENSION_SUPPORT_HTC_vive_focus3_controller_interaction(_)
+#endif
+
+
+/*
  * XR_MNDX_ball_on_a_stick_controller
  */
 #if defined(XR_MNDX_ball_on_a_stick_controller) && defined(XRT_FEATURE_OPENXR_INTERACTION_MNDX)
@@ -587,6 +713,17 @@
 #define OXR_EXTENSION_SUPPORT_MNDX_system_buttons(_)
 #endif
 
+
+/*
+ * XR_MNDX_xdev_space
+ */
+#if defined(XR_MNDX_xdev_space) && defined(XRT_FEATURE_OPENXR_XDEV_SPACE)
+#define OXR_HAVE_MNDX_xdev_space
+#define OXR_EXTENSION_SUPPORT_MNDX_xdev_space(_) _(MNDX_xdev_space, MNDX_XDEV_SPACE)
+#else
+#define OXR_EXTENSION_SUPPORT_MNDX_xdev_space(_)
+#endif
+
 // end of GENERATED per-extension defines - do not modify - used by scripts
 
 /*!
@@ -625,6 +762,8 @@
     OXR_EXTENSION_SUPPORT_KHR_D3D12_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_loader_init(_) \
     OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_) \
+    OXR_EXTENSION_SUPPORT_KHR_locate_spaces(_) \
+    OXR_EXTENSION_SUPPORT_KHR_maintenance1(_) \
     OXR_EXTENSION_SUPPORT_KHR_opengl_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_opengl_es_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_swapchain_usage_input_attachment_bit(_) \
@@ -643,11 +782,18 @@
     OXR_EXTENSION_SUPPORT_EXT_palm_pose(_) \
     OXR_EXTENSION_SUPPORT_EXT_performance_settings(_) \
     OXR_EXTENSION_SUPPORT_EXT_samsung_odyssey_controller(_) \
+    OXR_EXTENSION_SUPPORT_BD_controller_interaction(_) \
+    OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_alpha_blend(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_image_layout(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_settings(_) \
-    OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_)  \
+    OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_) \
     OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_) \
+    OXR_EXTENSION_SUPPORT_FB_passthrough(_) \
+    OXR_EXTENSION_SUPPORT_FB_touch_controller_pro(_) \
+    OXR_EXTENSION_SUPPORT_FB_touch_controller_proximity(_) \
+    OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
+    OXR_EXTENSION_SUPPORT_META_touch_controller_plus(_) \
     OXR_EXTENSION_SUPPORT_ML_ml2_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_MND_headless(_) \
     OXR_EXTENSION_SUPPORT_MND_swapchain_usage_input_attachment_bit(_) \
@@ -656,9 +802,12 @@
     OXR_EXTENSION_SUPPORT_OPPO_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_EXTX_overlay(_) \
     OXR_EXTENSION_SUPPORT_HTCX_vive_tracker_interaction(_) \
+    OXR_EXTENSION_SUPPORT_HTC_vive_cosmos_controller_interaction(_) \
+    OXR_EXTENSION_SUPPORT_HTC_vive_focus3_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_MNDX_ball_on_a_stick_controller(_) \
     OXR_EXTENSION_SUPPORT_MNDX_egl_enable(_) \
     OXR_EXTENSION_SUPPORT_MNDX_force_feedback_curl(_) \
     OXR_EXTENSION_SUPPORT_MNDX_hydra(_) \
-    OXR_EXTENSION_SUPPORT_MNDX_system_buttons(_)
+    OXR_EXTENSION_SUPPORT_MNDX_system_buttons(_) \
+    OXR_EXTENSION_SUPPORT_MNDX_xdev_space(_)
 // clang-format on

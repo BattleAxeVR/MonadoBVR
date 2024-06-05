@@ -1,4 +1,4 @@
-// Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -121,6 +121,10 @@ struct oxr_interaction_profile;
 struct oxr_action_set_ref;
 struct oxr_action_ref;
 struct oxr_hand_tracker;
+struct oxr_facial_tracker_htc;
+struct oxr_facial_tracker_fb;
+struct oxr_body_tracker_fb;
+struct oxr_xdev_list;
 
 #define XRT_MAX_HANDLE_CHILDREN 256
 #define OXR_MAX_BINDINGS_PER_ACTION 32
@@ -222,6 +226,7 @@ oxr_instance_to_openxr(struct oxr_instance *inst)
 XrResult
 oxr_instance_create(struct oxr_logger *log,
                     const XrInstanceCreateInfo *createInfo,
+                    XrVersion major_minor,
                     const struct oxr_extension_status *extensions,
                     struct oxr_instance **out_inst);
 
@@ -382,6 +387,31 @@ oxr_action_to_openxr(struct oxr_action *act)
 	return XRT_CAST_PTR_TO_OXR_HANDLE(XrAction, act);
 }
 
+#ifdef OXR_HAVE_HTC_facial_tracking
+/*!
+ * To go back to a OpenXR object.
+ *
+ * @relates oxr_facial_tracker_htc
+ */
+static inline XrFacialTrackerHTC
+oxr_facial_tracker_htc_to_openxr(struct oxr_facial_tracker_htc *face_tracker_htc)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrFacialTrackerHTC, face_tracker_htc);
+}
+#endif
+
+#ifdef OXR_HAVE_FB_body_tracking
+/*!
+ * To go back to a OpenXR object.
+ *
+ * @relates oxr_facial_tracker_htc
+ */
+static inline XrBodyTrackerFB
+oxr_body_tracker_fb_to_openxr(struct oxr_body_tracker_fb *body_tracker_fb)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrBodyTrackerFB, body_tracker_fb);
+}
+#endif
 
 /*!
  *
@@ -764,6 +794,17 @@ oxr_session_hand_joints(struct oxr_logger *log,
                         const XrHandJointsLocateInfoEXT *locateInfo,
                         XrHandJointLocationsEXT *locations);
 
+/*
+ * Gets the body pose in the base space.
+ */
+XrResult
+oxr_get_base_body_pose(struct oxr_logger *log,
+                       const struct xrt_body_joint_set *body_joint_set,
+                       struct oxr_space *base_spc,
+                       struct xrt_device *body_xdev,
+                       XrTime at_time,
+                       struct xrt_space_relation *out_base_body);
+
 XrResult
 oxr_session_apply_force_feedback(struct oxr_logger *log,
                                  struct oxr_hand_tracker *hand_tracker,
@@ -784,6 +825,12 @@ oxr_session_get_visibility_mask(struct oxr_logger *log,
                                 XrVisibilityMaskTypeKHR visibilityMaskType,
                                 uint32_t viewIndex,
                                 XrVisibilityMaskKHR *visibilityMask);
+
+XrResult
+oxr_event_push_XrEventDataVisibilityMaskChangedKHR(struct oxr_logger *log,
+                                                   struct oxr_session *sess,
+                                                   XrViewConfigurationType viewConfigurationType,
+                                                   uint32_t viewIndex);
 #endif // OXR_HAVE_KHR_visibility_mask
 
 #ifdef OXR_HAVE_EXT_performance_settings
@@ -817,14 +864,40 @@ oxr_space_action_create(struct oxr_logger *log,
                         struct oxr_space **out_space);
 
 XrResult
+oxr_space_get_reference_bounds_rect(struct oxr_logger *log,
+                                    struct oxr_session *sess,
+                                    XrReferenceSpaceType referenceSpaceType,
+                                    XrExtent2Df *bounds);
+
+XrResult
 oxr_space_reference_create(struct oxr_logger *log,
                            struct oxr_session *sess,
                            const XrReferenceSpaceCreateInfo *createInfo,
                            struct oxr_space **out_space);
 
+/*!
+ * Monado special space that always points to a specific @ref xrt_device and
+ * pose, useful when you want to bypass the action binding system for instance.
+ */
+XrResult
+oxr_space_xdev_pose_create(struct oxr_logger *log,
+                           struct oxr_session *sess,
+                           struct xrt_device *xdev,
+                           enum xrt_input_name name,
+                           const struct xrt_pose *pose,
+                           struct oxr_space **out_space);
+
 XrResult
 oxr_space_locate(
     struct oxr_logger *log, struct oxr_space *spc, struct oxr_space *baseSpc, XrTime time, XrSpaceLocation *location);
+
+XrResult
+oxr_spaces_locate(struct oxr_logger *log,
+                  struct oxr_space **spcs,
+                  uint32_t spc_count,
+                  struct oxr_space *baseSpc,
+                  XrTime time,
+                  XrSpaceLocations *locations);
 
 /*!
  * Locate the @ref xrt_device in the given base space, useful for implementing
@@ -900,7 +973,11 @@ oxr_system_select(struct oxr_logger *log,
                   struct oxr_system **out_selected);
 
 XrResult
-oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, struct oxr_system *sys);
+oxr_system_fill_in(struct oxr_logger *log,
+                   struct oxr_instance *inst,
+                   XrSystemId systemId,
+                   uint32_t view_count,
+                   struct oxr_system *sys);
 
 XrResult
 oxr_system_verify_id(struct oxr_logger *log, const struct oxr_instance *inst, XrSystemId systemId);
@@ -952,6 +1029,14 @@ oxr_system_get_eye_gaze_support(struct oxr_logger *log, struct oxr_instance *ins
 bool
 oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instance *inst);
 
+void
+oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
+                                         struct oxr_instance *inst,
+                                         bool *supports_eye,
+                                         bool *supports_lip);
+
+bool
+oxr_system_get_body_tracking_fb_support(struct oxr_logger *log, struct oxr_instance *inst);
 
 /*
  *
@@ -1048,6 +1133,34 @@ oxr_xdev_get_hand_tracking_at(struct oxr_logger *log,
                               enum xrt_input_name name,
                               XrTime at_time,
                               struct xrt_hand_joint_set *out_value);
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+static inline XrXDevListMNDX
+oxr_xdev_list_to_openxr(struct oxr_xdev_list *sc)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrXDevListMNDX, sc);
+}
+
+XrResult
+oxr_xdev_list_create(struct oxr_logger *log,
+                     struct oxr_session *sess,
+                     const XrCreateXDevListInfoMNDX *createInfo,
+                     struct oxr_xdev_list **out_xdl);
+
+XrResult
+oxr_xdev_list_get_properties(struct oxr_logger *log,
+                             struct oxr_xdev_list *xdl,
+                             uint32_t index,
+                             XrXDevPropertiesMNDX *properties);
+
+XrResult
+oxr_xdev_list_space_create(struct oxr_logger *log,
+                           struct oxr_xdev_list *xdl,
+                           const XrCreateXDevSpaceInfoMNDX *createInfo,
+                           uint32_t index,
+                           struct oxr_space **out_space);
+
+#endif // OXR_HAVE_MNDX_xdev_space
 
 
 /*
@@ -1352,6 +1465,10 @@ struct oxr_system
 
 	struct xrt_visibility_mask *visibility_mask[2];
 
+#ifdef OXR_HAVE_MNDX_xdev_space
+	bool supports_xdev_space;
+#endif
+
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	//! The instance/device we create when vulkan_enable2 is used
 	VkInstance vulkan_enable2_instance;
@@ -1385,6 +1502,8 @@ struct oxr_system
 // clang-format off
 static inline struct xrt_device *get_role_head(struct oxr_system *sys) {return sys->xsysd->static_roles.head; }
 static inline struct xrt_device *get_role_eyes(struct oxr_system *sys) {return sys->xsysd->static_roles.eyes; }
+static inline struct xrt_device *get_role_face(struct oxr_system* sys) { return sys->xsysd->static_roles.face; }
+static inline struct xrt_device *get_role_body(struct oxr_system* sys) { return sys->xsysd->static_roles.body; }
 static inline struct xrt_device *get_role_hand_tracking_left(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.left; }
 static inline struct xrt_device *get_role_hand_tracking_right(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.right; }
 // clang-format on
@@ -1417,6 +1536,16 @@ get_role_profile_head(struct oxr_system *sys)
 }
 static inline enum xrt_device_name
 get_role_profile_eyes(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_face(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_body(struct oxr_system *sys)
 {
 	return XRT_DEVICE_INVALID;
 }
@@ -1484,6 +1613,13 @@ struct oxr_instance
 	//! Enabled extensions
 	struct oxr_extension_status extensions;
 
+	//! The OpenXR version requested in the app info. It determines the instance's OpenXR version.
+	struct
+	{
+		//! Stores only major.minor version. Simplifies comparisons for e.g. "at least OpenXR 1.1".
+		XrVersion major_minor;
+	} openxr_version;
+
 	// Hardcoded single system.
 	struct oxr_system system;
 
@@ -1525,25 +1661,6 @@ struct oxr_instance
 		OXR_FOR_EACH_SUBACTION_PATH(SUBACTION_PATH_MEMBER)
 
 #undef SUBACTION_PATH_MEMBER
-
-
-		XrPath khr_simple_controller;
-		XrPath google_daydream_controller;
-		XrPath htc_vive_controller;
-		XrPath htc_vive_pro;
-		XrPath microsoft_motion_controller;
-		XrPath microsoft_xbox_controller;
-		XrPath oculus_go_controller;
-		XrPath oculus_touch_controller;
-		XrPath valve_index_controller;
-		XrPath hp_mixed_reality_controller;
-		XrPath samsung_odyssey_controller;
-		XrPath ml_ml2_controller;
-		XrPath mndx_ball_on_a_stick_controller;
-		XrPath msft_hand_interaction;
-		XrPath ext_eye_gaze_interaction;
-		XrPath ext_hand_interaction;
-		XrPath oppo_mr_controller;
 	} path_cache;
 
 	struct
@@ -1915,6 +2032,24 @@ struct oxr_subaction_paths
 };
 
 /*!
+ * Helper function to determine if the set of paths in @p a is a subset of the
+ * paths in @p b.
+ *
+ * @public @memberof oxr_subaction_paths
+ */
+static inline bool
+oxr_subaction_paths_is_subset_of(const struct oxr_subaction_paths *a, const struct oxr_subaction_paths *b)
+{
+#define OXR_CHECK_SUBACTION_PATHS(X)                                                                                   \
+	if (a->X && !b->X) {                                                                                           \
+		return false;                                                                                          \
+	}
+	OXR_FOR_EACH_SUBACTION_PATH(OXR_CHECK_SUBACTION_PATHS)
+#undef OXR_CHECK_SUBACTION_PATHS
+	return true;
+}
+
+/*!
  * The data associated with the attachment of an Action Set (@ref
  * oxr_action_set) to as Session (@ref oxr_session).
  *
@@ -2110,7 +2245,8 @@ oxr_space_type_is_reference(enum oxr_space_type space_type)
 		return true;
 
 	case OXR_SPACE_TYPE_ACTION:
-		// Not a reference space.
+	case OXR_SPACE_TYPE_XDEV_POSE:
+		// These are not reference spaces.
 		return false;
 	}
 
@@ -2154,6 +2290,11 @@ struct oxr_space
 		struct xrt_device *xdev;
 		enum xrt_input_name name;
 	} action;
+
+	struct
+	{
+		struct xrt_space *xs;
+	} xdev_pose;
 };
 
 /*!
@@ -2290,6 +2431,8 @@ struct oxr_action_set_ref
 		struct u_hashset *name_store;
 		struct u_hashset *loc_store;
 	} actions;
+
+	struct oxr_subaction_paths permitted_subaction_paths;
 };
 
 /*!
@@ -2456,6 +2599,179 @@ struct oxr_hand_tracker
 	XrHandEXT hand;
 	XrHandJointSetEXT hand_joint_set;
 };
+
+#ifdef OXR_HAVE_FB_passthrough
+
+struct oxr_passthrough
+{
+	struct oxr_handle_base handle;
+
+	struct oxr_session *sess;
+
+	XrPassthroughFlagsFB flags;
+
+	bool paused;
+};
+
+struct oxr_passthrough_layer
+{
+	struct oxr_handle_base handle;
+
+	struct oxr_session *sess;
+
+	XrPassthroughFB passthrough;
+
+	XrPassthroughFlagsFB flags;
+
+	XrPassthroughLayerPurposeFB purpose;
+
+	bool paused;
+
+	XrPassthroughStyleFB style;
+	XrPassthroughColorMapMonoToRgbaFB monoToRgba;
+	XrPassthroughColorMapMonoToMonoFB monoToMono;
+	XrPassthroughBrightnessContrastSaturationFB brightnessContrastSaturation;
+};
+
+XrResult
+oxr_passthrough_create(struct oxr_logger *log,
+                       struct oxr_session *sess,
+                       const XrPassthroughCreateInfoFB *createInfo,
+                       struct oxr_passthrough **out_passthrough);
+
+XrResult
+oxr_passthrough_layer_create(struct oxr_logger *log,
+                             struct oxr_session *sess,
+                             const XrPassthroughLayerCreateInfoFB *createInfo,
+                             struct oxr_passthrough_layer **out_layer);
+
+static inline XrPassthroughFB
+oxr_passthrough_to_openxr(struct oxr_passthrough *passthrough)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrPassthroughFB, passthrough);
+}
+
+static inline XrPassthroughLayerFB
+oxr_passthrough_layer_to_openxr(struct oxr_passthrough_layer *passthroughLayer)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrPassthroughLayerFB, passthroughLayer);
+}
+
+XrResult
+oxr_event_push_XrEventDataPassthroughStateChangedFB(struct oxr_logger *log,
+                                                    struct oxr_session *sess,
+                                                    XrPassthroughStateChangedFlagsFB flags);
+
+#endif // OXR_HAVE_FB_passthrough
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+/*!
+ * HTC specific Facial tracker.
+ *
+ * Parent type/handle is @ref oxr_instance
+ *
+ *
+ * @obj{XrFacialTrackerHTC}
+ * @extends oxr_handle_base
+ */
+struct oxr_facial_tracker_htc
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this face tracker.
+	struct oxr_session *sess;
+
+	//! xrt_device backing this face tracker
+	struct xrt_device *xdev;
+
+	//! Type of facial tracking, eyes or lips
+	enum xrt_facial_tracking_type_htc facial_tracking_type;
+};
+
+XrResult
+oxr_facial_tracker_htc_create(struct oxr_logger *log,
+                              struct oxr_session *sess,
+                              const XrFacialTrackerCreateInfoHTC *createInfo,
+                              struct oxr_facial_tracker_htc **out_face_tracker_htc);
+
+XrResult
+oxr_get_facial_expressions_htc(struct oxr_logger *log,
+                               struct oxr_facial_tracker_htc *facial_tracker_htc,
+                               XrFacialExpressionsHTC *facialExpressions);
+#endif
+
+#ifdef OXR_HAVE_FB_body_tracking
+/*!
+ * FB specific Body tracker.
+ *
+ * Parent type/handle is @ref oxr_instance
+ *
+ * @obj{XrBodyTrackerFB}
+ * @extends oxr_handle_base
+ */
+struct oxr_body_tracker_fb
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this face tracker.
+	struct oxr_session *sess;
+
+	//! xrt_device backing this face tracker
+	struct xrt_device *xdev;
+
+	//! Type of the body joint set e.g. XR_FB_body_tracking or XR_META_body_tracking_full_body
+	enum xrt_body_joint_set_type_fb joint_set_type;
+};
+
+XrResult
+oxr_create_body_tracker_fb(struct oxr_logger *log,
+                           struct oxr_session *sess,
+                           const XrBodyTrackerCreateInfoFB *createInfo,
+                           struct oxr_body_tracker_fb **out_body_tracker_fb);
+
+XrResult
+oxr_get_body_skeleton_fb(struct oxr_logger *log,
+                         struct oxr_body_tracker_fb *body_tracker_fb,
+                         XrBodySkeletonFB *skeleton);
+
+XrResult
+oxr_locate_body_joints_fb(struct oxr_logger *log,
+                          struct oxr_body_tracker_fb *body_tracker_fb,
+                          struct oxr_space *base_spc,
+                          const XrBodyJointsLocateInfoFB *locateInfo,
+                          XrBodyJointLocationsFB *locations);
+#endif
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+/*!
+ * Object that holds a list of the current @ref xrt_devices.
+ *
+ * Parent type/handle is @ref oxr_session
+ *
+ * @obj{XrXDevList}
+ * @extends oxr_handle_base
+ */
+struct oxr_xdev_list
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this @ref xrt_device list.
+	struct oxr_session *sess;
+
+	//! Monotonically increasing number.
+	uint64_t generation_number;
+
+	uint64_t ids[XRT_SYSTEM_MAX_DEVICES];
+	struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES];
+	enum xrt_input_name names[XRT_SYSTEM_MAX_DEVICES];
+
+	//! Counts ids, names and xdevs.
+	uint32_t device_count;
+};
+#endif // OXR_HAVE_MNDX_xdev_space
 
 /*!
  * @}

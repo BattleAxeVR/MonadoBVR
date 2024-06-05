@@ -1,4 +1,4 @@
-// Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // Copyright 2023, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -31,6 +31,19 @@ struct xrt_session_info;
  * System.
  *
  */
+
+#define XRT_SYSTEM_ID 1
+
+#define XRT_MAX_SYSTEM_NAME_SIZE 256
+
+/*!
+ * Properties provided by the system.
+ */
+struct xrt_system_properties
+{
+	uint32_t vendor_id;
+	char name[XRT_MAX_SYSTEM_NAME_SIZE];
+};
 
 /*!
  * A system is a collection of devices, policies and optionally a compositor
@@ -69,6 +82,8 @@ struct xrt_system
 	 * @param xsys Pointer to self
 	 */
 	void (*destroy)(struct xrt_system *xsys);
+
+	struct xrt_system_properties properties;
 };
 
 /*!
@@ -236,6 +251,18 @@ struct xrt_system_devices
 		 * (optional).
 		 */
 		struct xrt_device *eyes;
+
+		/*!
+		 * An observing pointer to the device providing face tracking
+		 * (optional).
+		 */
+		struct xrt_device *face;
+
+		/*!
+		 * An observing pointer to the device providing body tracking
+		 * (optional).
+		 */
+		struct xrt_device *body;
 
 		/*!
 		 * Devices providing optical (or otherwise more directly

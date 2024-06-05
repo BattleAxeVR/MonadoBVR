@@ -1,4 +1,4 @@
-// Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -200,6 +200,12 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 	EXT(ext_hand_tracking_enabled);
 	EXT(ext_eye_gaze_interaction_enabled);
 	EXT(ext_hand_interaction_enabled);
+#ifdef OXR_HAVE_HTC_facial_tracking
+	EXT(htc_facial_tracking_enabled);
+#endif
+#ifdef OXR_HAVE_FB_body_tracking
+	EXT(fb_body_tracking_enabled);
+#endif
 
 #undef EXT
 #undef PTT
@@ -291,6 +297,8 @@ ipc_handle_session_begin(volatile struct ipc_client_state *ics)
 	    .ext_hand_tracking_enabled = ics->client_state.info.ext_hand_tracking_enabled,
 	    .ext_eye_gaze_interaction_enabled = ics->client_state.info.ext_eye_gaze_interaction_enabled,
 	    .ext_hand_interaction_enabled = ics->client_state.info.ext_hand_interaction_enabled,
+	    .htc_facial_tracking_enabled = ics->client_state.info.htc_facial_tracking_enabled,
+	    .fb_body_tracking_enabled = ics->client_state.info.fb_body_tracking_enabled,
 	};
 
 	return xrt_comp_begin_session(ics->xc, &begin_session_info);
@@ -480,6 +488,108 @@ ipc_handle_space_locate_space(volatile struct ipc_client_state *ics,
 	    space,                              //
 	    offset,                             //
 	    out_relation);                      //
+}
+
+xrt_result_t
+ipc_handle_space_locate_spaces(volatile struct ipc_client_state *ics,
+                               uint32_t base_space_id,
+                               const struct xrt_pose *base_offset,
+                               uint32_t space_count,
+                               uint64_t at_timestamp)
+{
+	IPC_TRACE_MARKER();
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	struct ipc_server *s = ics->server;
+
+	struct xrt_space_overseer *xso = ics->server->xso;
+	struct xrt_space *base_space = NULL;
+
+	struct xrt_space **xspaces = U_TYPED_ARRAY_CALLOC(struct xrt_space *, space_count);
+	struct xrt_pose *offsets = U_TYPED_ARRAY_CALLOC(struct xrt_pose, space_count);
+	struct xrt_space_relation *out_relations = U_TYPED_ARRAY_CALLOC(struct xrt_space_relation, space_count);
+
+	xrt_result_t xret;
+
+	os_mutex_lock(&ics->server->global_state.lock);
+
+	uint32_t *space_ids = U_TYPED_ARRAY_CALLOC(uint32_t, space_count);
+
+	// we need to send back whether allocation succeeded so the client knows whether to send more data
+	if (space_ids == NULL) {
+		xret = XRT_ERROR_ALLOCATION;
+	} else {
+		xret = XRT_SUCCESS;
+	}
+
+	xret = ipc_send(imc, &xret, sizeof(enum xrt_result));
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "Failed to send spaces allocate result");
+		// Nothing else we can do
+		goto out_locate_spaces;
+	}
+
+	// only after sending the allocation result can we skip to the end in the allocation error case
+	if (space_ids == NULL) {
+		IPC_ERROR(s, "Failed to allocate space for receiving spaces ids");
+		goto out_locate_spaces;
+	}
+
+	xret = ipc_receive(imc, space_ids, space_count * sizeof(uint32_t));
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "Failed to receive spaces ids");
+		// assume early abort is possible, i.e. client will not send more data for this request
+		goto out_locate_spaces;
+	}
+
+	xret = ipc_receive(imc, offsets, space_count * sizeof(struct xrt_pose));
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "Failed to receive spaces offsets");
+		// assume early abort is possible, i.e. client will not send more data for this request
+		goto out_locate_spaces;
+	}
+
+	xret = validate_space_id(ics, base_space_id, &base_space);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Invalid base_space_id %d!", base_space_id);
+		// Client is receiving out_relations now, it will get xret on this receive.
+		goto out_locate_spaces;
+	}
+
+	for (uint32_t i = 0; i < space_count; i++) {
+		if (space_ids[i] == UINT32_MAX) {
+			xspaces[i] = NULL;
+		} else {
+			xret = validate_space_id(ics, space_ids[i], &xspaces[i]);
+			if (xret != XRT_SUCCESS) {
+				U_LOG_E("Invalid space_id space_ids[%d] = %d!", i, space_ids[i]);
+				// Client is receiving out_relations now, it will get xret on this receive.
+				goto out_locate_spaces;
+			}
+		}
+	}
+	xret = xrt_space_overseer_locate_spaces( //
+	    xso,                                 //
+	    base_space,                          //
+	    base_offset,                         //
+	    at_timestamp,                        //
+	    xspaces,                             //
+	    space_count,                         //
+	    offsets,                             //
+	    out_relations);                      //
+
+	xret = ipc_send(imc, out_relations, sizeof(struct xrt_space_relation) * space_count);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "Failed to send spaces relations");
+		// Nothing else we can do
+		goto out_locate_spaces;
+	}
+
+out_locate_spaces:
+	free(xspaces);
+	free(offsets);
+	free(out_relations);
+	os_mutex_unlock(&ics->server->global_state.lock);
+	return xret;
 }
 
 xrt_result_t
@@ -735,29 +845,30 @@ _update_projection_layer(struct xrt_compositor *xc,
 {
 	// xdev
 	uint32_t device_id = layer->xdev_id;
-	// left
-	uint32_t lxsci = layer->swapchain_ids[0];
-	// right
-	uint32_t rxsci = layer->swapchain_ids[1];
-
 	struct xrt_device *xdev = get_xdev(ics, device_id);
-	struct xrt_swapchain *lxcs = ics->xscs[lxsci];
-	struct xrt_swapchain *rxcs = ics->xscs[rxsci];
-
-	if (lxcs == NULL || rxcs == NULL) {
-		U_LOG_E("Invalid swap chain for projection layer!");
-		return false;
-	}
 
 	if (xdev == NULL) {
 		U_LOG_E("Invalid xdev for projection layer!");
 		return false;
 	}
 
+	uint32_t view_count = xdev->hmd->view_count;
+
+	struct xrt_swapchain *xcs[XRT_MAX_VIEWS];
+	for (uint32_t k = 0; k < view_count; k++) {
+		const uint32_t xsci = layer->swapchain_ids[k];
+		xcs[k] = ics->xscs[xsci];
+		if (xcs[k] == NULL) {
+			U_LOG_E("Invalid swap chain for projection layer!");
+			return false;
+		}
+	}
+
+
 	// Cast away volatile.
 	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
 
-	xrt_comp_layer_stereo_projection(xc, xdev, lxcs, rxcs, data);
+	xrt_comp_layer_projection(xc, xdev, xcs, data);
 
 	return true;
 }
@@ -770,35 +881,32 @@ _update_projection_layer_depth(struct xrt_compositor *xc,
 {
 	// xdev
 	uint32_t xdevi = layer->xdev_id;
-	// left
-	uint32_t l_xsci = layer->swapchain_ids[0];
-	// right
-	uint32_t r_xsci = layer->swapchain_ids[1];
-	// left
-	uint32_t l_d_xsci = layer->swapchain_ids[2];
-	// right
-	uint32_t r_d_xsci = layer->swapchain_ids[3];
+
+	// Cast away volatile.
+	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
 
 	struct xrt_device *xdev = get_xdev(ics, xdevi);
-	struct xrt_swapchain *l_xcs = ics->xscs[l_xsci];
-	struct xrt_swapchain *r_xcs = ics->xscs[r_xsci];
-	struct xrt_swapchain *l_d_xcs = ics->xscs[l_d_xsci];
-	struct xrt_swapchain *r_d_xcs = ics->xscs[r_d_xsci];
-
-	if (l_xcs == NULL || r_xcs == NULL || l_d_xcs == NULL || r_d_xcs == NULL) {
-		U_LOG_E("Invalid swap chain for projection layer #%u!", i);
-		return false;
-	}
-
 	if (xdev == NULL) {
 		U_LOG_E("Invalid xdev for projection layer #%u!", i);
 		return false;
 	}
 
-	// Cast away volatile.
-	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
+	struct xrt_swapchain *xcs[XRT_MAX_VIEWS];
+	struct xrt_swapchain *d_xcs[XRT_MAX_VIEWS];
 
-	xrt_comp_layer_stereo_projection_depth(xc, xdev, l_xcs, r_xcs, l_d_xcs, r_d_xcs, data);
+	for (uint32_t j = 0; j < data->view_count; j++) {
+		int xsci = layer->swapchain_ids[j];
+		int d_xsci = layer->swapchain_ids[j + data->view_count];
+
+		xcs[j] = ics->xscs[xsci];
+		d_xcs[j] = ics->xscs[d_xsci];
+		if (xcs[j] == NULL || d_xcs[j] == NULL) {
+			U_LOG_E("Invalid swap chain for projection layer #%u!", i);
+			return false;
+		}
+	}
+
+	xrt_comp_layer_projection_depth(xc, xdev, xcs, d_xcs, data);
 
 	return true;
 }
@@ -935,6 +1043,30 @@ _update_equirect2_layer(struct xrt_compositor *xc,
 }
 
 static bool
+_update_passthrough_layer(struct xrt_compositor *xc,
+                          volatile struct ipc_client_state *ics,
+                          volatile struct ipc_layer_entry *layer,
+                          uint32_t i)
+{
+	// xdev
+	uint32_t xdevi = layer->xdev_id;
+
+	struct xrt_device *xdev = get_xdev(ics, xdevi);
+
+	if (xdev == NULL) {
+		U_LOG_E("Invalid xdev for passthrough layer #%u!", i);
+		return false;
+	}
+
+	// Cast away volatile.
+	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
+
+	xrt_comp_layer_passthrough(xc, xdev, data);
+
+	return true;
+}
+
+static bool
 _update_layers(volatile struct ipc_client_state *ics, struct xrt_compositor *xc, struct ipc_layer_slot *slot)
 {
 	IPC_TRACE_MARKER();
@@ -943,12 +1075,12 @@ _update_layers(volatile struct ipc_client_state *ics, struct xrt_compositor *xc,
 		volatile struct ipc_layer_entry *layer = &slot->layers[i];
 
 		switch (layer->data.type) {
-		case XRT_LAYER_STEREO_PROJECTION:
+		case XRT_LAYER_PROJECTION:
 			if (!_update_projection_layer(xc, ics, layer, i)) {
 				return false;
 			}
 			break;
-		case XRT_LAYER_STEREO_PROJECTION_DEPTH:
+		case XRT_LAYER_PROJECTION_DEPTH:
 			if (!_update_projection_layer_depth(xc, ics, layer, i)) {
 				return false;
 			}
@@ -975,6 +1107,11 @@ _update_layers(volatile struct ipc_client_state *ics, struct xrt_compositor *xc,
 			break;
 		case XRT_LAYER_EQUIRECT2:
 			if (!_update_equirect2_layer(xc, ics, layer, i)) {
+				return false;
+			}
+			break;
+		case XRT_LAYER_PASSTHROUGH:
+			if (!_update_passthrough_layer(xc, ics, layer, i)) {
 				return false;
 			}
 			break;
@@ -1100,6 +1237,46 @@ ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state
 }
 
 xrt_result_t
+ipc_handle_compositor_create_passthrough(volatile struct ipc_client_state *ics,
+                                         const struct xrt_passthrough_create_info *info)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	return xrt_comp_create_passthrough(ics->xc, info);
+}
+
+xrt_result_t
+ipc_handle_compositor_create_passthrough_layer(volatile struct ipc_client_state *ics,
+                                               const struct xrt_passthrough_layer_create_info *info)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	return xrt_comp_create_passthrough_layer(ics->xc, info);
+}
+
+xrt_result_t
+ipc_handle_compositor_destroy_passthrough(volatile struct ipc_client_state *ics)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	xrt_comp_destroy_passthrough(ics->xc);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_compositor_set_thread_hint(volatile struct ipc_client_state *ics,
                                       enum xrt_thread_hint hint,
                                       uint32_t thread_id)
@@ -1112,6 +1289,20 @@ ipc_handle_compositor_set_thread_hint(volatile struct ipc_client_state *ics,
 	}
 
 	return xrt_comp_set_thread_hint(ics->xc, hint, thread_id);
+}
+
+xrt_result_t
+ipc_handle_compositor_get_reference_bounds_rect(volatile struct ipc_client_state *ics,
+                                                enum xrt_reference_space_type reference_space_type,
+                                                struct xrt_vec2 *bounds)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	return xrt_comp_get_reference_bounds_rect(ics->xc, reference_space_type, bounds);
 }
 
 xrt_result_t
@@ -1141,6 +1332,14 @@ ipc_handle_system_get_clients(volatile struct ipc_client_state *_ics, struct ipc
 	os_mutex_unlock(&s->global_state.lock);
 
 	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_system_get_properties(volatile struct ipc_client_state *_ics, struct xrt_system_properties *out_properties)
+{
+	struct ipc_server *s = _ics->server;
+
+	return ipc_server_get_system_properties(s, out_properties);
 }
 
 xrt_result_t
@@ -1663,17 +1862,17 @@ ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
                                    uint32_t id,
                                    const struct xrt_vec3 *default_eye_relation,
                                    uint64_t at_timestamp_ns,
+                                   uint32_t view_count,
                                    struct ipc_info_get_view_poses_2 *out_info)
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
 	struct xrt_device *xdev = get_xdev(ics, device_id);
-
 	xrt_device_get_view_poses(    //
 	    xdev,                     //
 	    default_eye_relation,     //
 	    at_timestamp_ns,          //
-	    2,                        //
+	    view_count,               //
 	    &out_info->head_relation, //
 	    out_info->fovs,           //
 	    out_info->poses);         //
@@ -1782,4 +1981,37 @@ xrt_result_t
 ipc_handle_system_devices_get_roles(volatile struct ipc_client_state *ics, struct xrt_system_roles *out_roles)
 {
 	return xrt_system_devices_get_roles(ics->server->xsysd, out_roles);
+}
+
+xrt_result_t
+ipc_handle_device_get_face_tracking(volatile struct ipc_client_state *ics,
+                                    uint32_t id,
+                                    enum xrt_input_name facial_expression_type,
+                                    struct xrt_facial_expression_set *out_value)
+{
+	const uint32_t device_id = id;
+	struct xrt_device *xdev = get_xdev(ics, device_id);
+	// Get facial expression data.
+	return xrt_device_get_face_tracking(xdev, facial_expression_type, out_value);
+}
+
+xrt_result_t
+ipc_handle_device_get_body_skeleton(volatile struct ipc_client_state *ics,
+                                    uint32_t id,
+                                    enum xrt_input_name body_tracking_type,
+                                    struct xrt_body_skeleton *out_value)
+{
+	struct xrt_device *xdev = get_xdev(ics, id);
+	return xrt_device_get_body_skeleton(xdev, body_tracking_type, out_value);
+}
+
+xrt_result_t
+ipc_handle_device_get_body_joints(volatile struct ipc_client_state *ics,
+                                  uint32_t id,
+                                  enum xrt_input_name body_tracking_type,
+                                  uint64_t desired_timestamp_ns,
+                                  struct xrt_body_joint_set *out_value)
+{
+	struct xrt_device *xdev = get_xdev(ics, id);
+	return xrt_device_get_body_joints(xdev, body_tracking_type, desired_timestamp_ns, out_value);
 }

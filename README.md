@@ -55,15 +55,15 @@ Optional (but recommended) dependencies:
 
 Truly optional dependencies, useful for some drivers, app support, etc.:
 
-* Doxygen - Debian/Ubuntu package ´doxygen´ and ´graphviz´
+* Doxygen - Debian/Ubuntu package `doxygen` and `graphviz`
 * Wayland development packages
 * Xlib development packages
-* libhidapi - Debian/Ubuntu package ´libhidapi-dev´
+* libhidapi - Debian/Ubuntu package `libhidapi-dev`
 * OpenCV
-* libuvc - Debian/Ubuntu package ´libuvc-dev´
+* libuvc - Debian/Ubuntu package `libuvc-dev`
 * libjpeg
-* libbluetooth - Debian/Ubuntu package ´libbluetooth-dev´
-* libsdl - Debian/Ubuntu package ´libsdl2-dev´
+* libbluetooth - Debian/Ubuntu package `libbluetooth-dev`
+* libsdl - Debian/Ubuntu package `libsdl2-dev`
 
 Experimental Windows support requires the Vulkan SDK and also needs or works
 best with the following vcpkg packages installed:
@@ -81,7 +81,7 @@ install to make sure it is available.
 Monado has been tested on these distributions, but is expected to work on almost
 any modern distribution.
 
-* Ubuntu 22.04, 20.04, (18.04 may not be fully supported)
+* Ubuntu 24.04, 22.04, 20.04, (18.04 may not be fully supported)
 * Debian 11 `bookworm`, 10 `buster`
   * Up-to-date package lists can be found in our CI config file,
     `.gitlab-ci.yml`

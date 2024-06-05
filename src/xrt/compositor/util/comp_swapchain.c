@@ -477,7 +477,7 @@ error:
 static void
 really_destroy(struct comp_swapchain *sc)
 {
-	// Re-use close function.
+	// Reuse close function.
 	comp_swapchain_teardown(sc);
 
 	free(sc);
@@ -532,7 +532,6 @@ comp_swapchain_create_init(struct comp_swapchain *sc,
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "Failed to get native handles for images.");
 		vk_ic_destroy(vk, &sc->vkic);
-		free(sc);
 		return XRT_ERROR_VULKAN;
 	}
 	for (uint32_t i = 0; i < sc->vkic.image_count; i++) {
@@ -544,7 +543,6 @@ comp_swapchain_create_init(struct comp_swapchain *sc,
 	xrt_result_t res = do_post_create_vulkan_setup(vk, info, sc);
 	if (res != XRT_SUCCESS) {
 		vk_ic_destroy(vk, &sc->vkic);
-		free(sc);
 		return res;
 	}
 
@@ -571,6 +569,12 @@ comp_swapchain_import_init(struct comp_swapchain *sc,
 
 	// Use the image helper to get the images.
 	ret = vk_ic_from_natives(vk, info, native_images, native_image_count, &sc->vkic);
+	if (ret == VK_ERROR_FEATURE_NOT_PRESENT) {
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+	}
+	if (ret == VK_ERROR_FORMAT_NOT_SUPPORTED) {
+		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+	}
 	if (ret != VK_SUCCESS) {
 		return XRT_ERROR_VULKAN;
 	}
@@ -578,7 +582,6 @@ comp_swapchain_import_init(struct comp_swapchain *sc,
 	xrt_result_t res = do_post_create_vulkan_setup(vk, info, sc);
 	if (res != XRT_SUCCESS) {
 		vk_ic_destroy(vk, &sc->vkic);
-		free(sc);
 		return res;
 	}
 

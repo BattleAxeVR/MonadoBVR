@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -75,13 +75,14 @@ typedef uint64_t VkDeviceMemory;
  */
 enum xrt_layer_type
 {
-	XRT_LAYER_STEREO_PROJECTION,
-	XRT_LAYER_STEREO_PROJECTION_DEPTH,
+	XRT_LAYER_PROJECTION,
+	XRT_LAYER_PROJECTION_DEPTH,
 	XRT_LAYER_QUAD,
 	XRT_LAYER_CUBE,
 	XRT_LAYER_CYLINDER,
 	XRT_LAYER_EQUIRECT1,
 	XRT_LAYER_EQUIRECT2,
+	XRT_LAYER_PASSTHROUGH
 };
 
 /*!
@@ -222,14 +223,14 @@ struct xrt_layer_projection_view_data
 };
 
 /*!
- * All the pure data values associated with a stereo projection layer.
+ * All the pure data values associated with a projection layer.
  *
  * The @ref xrt_swapchain references and @ref xrt_device are provided outside of
  * this struct.
  */
-struct xrt_layer_stereo_projection_data
+struct xrt_layer_projection_data
 {
-	struct xrt_layer_projection_view_data l, r;
+	struct xrt_layer_projection_view_data v[XRT_MAX_VIEWS];
 };
 
 /*!
@@ -256,17 +257,17 @@ struct xrt_layer_depth_test_data
 };
 
 /*!
- * All the pure data values associated with a stereo projection layer with depth
+ * All the pure data values associated with a projection layer with depth
  * swapchain attached.
  *
  * The @ref xrt_swapchain references and @ref xrt_device are provided outside of
  * this struct.
  */
-struct xrt_layer_stereo_projection_depth_data
+struct xrt_layer_projection_depth_data
 {
-	struct xrt_layer_projection_view_data l, r;
+	struct xrt_layer_projection_view_data v[XRT_MAX_VIEWS];
 
-	struct xrt_layer_depth_data l_d, r_d;
+	struct xrt_layer_depth_data d[XRT_MAX_VIEWS];
 };
 
 /*!
@@ -356,6 +357,34 @@ struct xrt_layer_equirect2_data
 };
 
 /*!
+ * @interface xrt_passthrough
+ */
+struct xrt_passthrough
+{
+	bool paused;
+};
+
+/*!
+ * @interface xrt_passthrough_layer
+ */
+struct xrt_passthrough_layer
+{
+	bool paused;
+};
+
+/*!
+ * All the pure data values associated with a passthrough layer.
+ *
+ * The @ref xrt_swapchain references and @ref xrt_device are provided outside of
+ * this struct.
+ */
+struct xrt_layer_passthrough_data
+{
+	struct xrt_passthrough xrt_pt;
+	struct xrt_passthrough_layer xrt_pl;
+};
+
+/*!
  * All the pure data values associated with a composition layer.
  *
  * The @ref xrt_swapchain references and @ref xrt_device are provided outside of
@@ -429,14 +458,16 @@ struct xrt_layer_data
 	 * xrt_compositor::layer_commit where this data was passed.
 	 */
 	union {
-		struct xrt_layer_stereo_projection_data stereo;
-		struct xrt_layer_stereo_projection_depth_data stereo_depth;
+		struct xrt_layer_projection_data proj;
+		struct xrt_layer_projection_depth_data depth;
 		struct xrt_layer_quad_data quad;
 		struct xrt_layer_cube_data cube;
 		struct xrt_layer_cylinder_data cylinder;
 		struct xrt_layer_equirect1_data equirect1;
 		struct xrt_layer_equirect2_data equirect2;
+		struct xrt_layer_passthrough_data passthrough;
 	};
+	uint32_t view_count;
 };
 
 /*!
@@ -862,6 +893,23 @@ struct xrt_swapchain_create_info
 };
 
 /*!
+ * Passthrough creation info.
+ */
+struct xrt_passthrough_create_info
+{
+	enum xrt_passthrough_create_flags create;
+};
+
+/*!
+ * Passthrough layer creation info.
+ */
+struct xrt_passthrough_layer_create_info
+{
+	enum xrt_passthrough_create_flags create;
+	enum xrt_passthrough_purpose_flags purpose;
+};
+
+/*!
  * Struct used to negotiate properties of a swapchain that is created outside
  * of the compositor. Often used by a client compositor or IPC layer to allocate
  * the swapchain images and then pass them into the native compositor.
@@ -912,6 +960,8 @@ struct xrt_begin_session_info
 	bool ext_hand_tracking_enabled;
 	bool ext_eye_gaze_interaction_enabled;
 	bool ext_hand_interaction_enabled;
+	bool htc_facial_tracking_enabled;
+	bool fb_body_tracking_enabled;
 };
 
 /*!
@@ -990,6 +1040,22 @@ struct xrt_compositor
 	                                 xrt_graphics_sync_handle_t *out_handle,
 	                                 struct xrt_compositor_semaphore **out_xcsem);
 	/*! @} */
+
+	/*!
+	 * Create a passthrough.
+	 */
+	xrt_result_t (*create_passthrough)(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info);
+
+
+	/*!
+	 * Create a passthrough layer.
+	 */
+	xrt_result_t (*create_passthrough_layer)(struct xrt_compositor *xc,
+	                                         const struct xrt_passthrough_layer_create_info *info);
+	/*!
+	 * Destroy a passthrough.
+	 */
+	xrt_result_t (*destroy_passthrough)(struct xrt_compositor *xc);
 
 	/*!
 	 * @name Function pointers for session functions
@@ -1132,7 +1198,7 @@ struct xrt_compositor
 	xrt_result_t (*layer_begin)(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data);
 
 	/*!
-	 * @brief Adds a stereo projection layer for submissions.
+	 * @brief Adds a projection layer for submissions.
 	 *
 	 * Note that e.g. the same swapchain object may be passed as both
 	 * @p l_xsc and @p r_xsc - the parameters in @p data identify
@@ -1140,20 +1206,18 @@ struct xrt_compositor
 	 *
 	 * @param xc          Self pointer
 	 * @param xdev        The device the layer is relative to.
-	 * @param l_xsc       Swapchain object containing left eye RGB data.
-	 * @param r_xsc       Swapchain object containing right eye RGB data.
+	 * @param xsc         Swapchain object containing eye RGB data.
 	 * @param data        All of the pure data bits (not pointers/handles),
 	 *                    including what parts of the supplied swapchain
 	 *                    objects to use for each view.
 	 */
-	xrt_result_t (*layer_stereo_projection)(struct xrt_compositor *xc,
-	                                        struct xrt_device *xdev,
-	                                        struct xrt_swapchain *l_xsc,
-	                                        struct xrt_swapchain *r_xsc,
-	                                        const struct xrt_layer_data *data);
+	xrt_result_t (*layer_projection)(struct xrt_compositor *xc,
+	                                 struct xrt_device *xdev,
+	                                 struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+	                                 const struct xrt_layer_data *data);
 
 	/*!
-	 * @brief Adds a stereo projection layer for submission, has depth information.
+	 * @brief Adds a projection layer for submission, has depth information.
 	 *
 	 * Note that e.g. the same swapchain object may be passed as both
 	 * @p l_xsc and @p r_xsc - the parameters in @p data identify
@@ -1171,13 +1235,11 @@ struct xrt_compositor
 	 *                    including what parts of the supplied swapchain
 	 *                    objects to use for each view.
 	 */
-	xrt_result_t (*layer_stereo_projection_depth)(struct xrt_compositor *xc,
-	                                              struct xrt_device *xdev,
-	                                              struct xrt_swapchain *l_xsc,
-	                                              struct xrt_swapchain *r_xsc,
-	                                              struct xrt_swapchain *l_d_xsc,
-	                                              struct xrt_swapchain *r_d_xsc,
-	                                              const struct xrt_layer_data *data);
+	xrt_result_t (*layer_projection_depth)(struct xrt_compositor *xc,
+	                                       struct xrt_device *xdev,
+	                                       struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+	                                       struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+	                                       const struct xrt_layer_data *data);
 
 	/*!
 	 * Adds a quad layer for submission, the center of the quad is specified
@@ -1257,6 +1319,19 @@ struct xrt_compositor
 	                                const struct xrt_layer_data *data);
 
 	/*!
+	 * Adds a passthrough layer for submission.
+	 *
+	 * @param xc          Self pointer
+	 * @param xdev        The device the layer is relative to.
+	 * @param data        All of the pure data bits (not pointers/handles),
+	 *                    including what part of the supplied swapchain
+	 *                    object to use.
+	 */
+	xrt_result_t (*layer_passthrough)(struct xrt_compositor *xc,
+	                                  struct xrt_device *xdev,
+	                                  const struct xrt_layer_data *data);
+
+	/*!
 	 * @brief Commits all of the submitted layers.
 	 *
 	 * Only after this call will the compositor actually use the layers.
@@ -1310,6 +1385,13 @@ struct xrt_compositor
 	xrt_result_t (*set_performance_level)(struct xrt_compositor *xc,
 	                                      enum xrt_perf_domain domain,
 	                                      enum xrt_perf_set_level level);
+
+	/*!
+	 * @brief Get the extents of the reference space’s bounds rectangle.
+	 */
+	xrt_result_t (*get_reference_bounds_rect)(struct xrt_compositor *xc,
+	                                          enum xrt_reference_space_type reference_space_type,
+	                                          struct xrt_vec2 *bounds);
 
 	/*!
 	 * Teardown the compositor.
@@ -1419,6 +1501,44 @@ xrt_comp_create_semaphore(struct xrt_compositor *xc,
 
 /*! @} */
 
+/*!
+ * @copydoc xrt_compositor::create_passthrough
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	return xc->create_passthrough(xc, info);
+}
+
+/*!
+ * @copydoc xrt_compositor::create_passthrough_layer
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_create_passthrough_layer(struct xrt_compositor *xc, const struct xrt_passthrough_layer_create_info *info)
+{
+	return xc->create_passthrough_layer(xc, info);
+}
+
+/*!
+ * @copydoc xrt_compositor::destroy_passthrough
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_destroy_passthrough(struct xrt_compositor *xc)
+{
+	return xc->destroy_passthrough(xc);
+}
 
 /*!
  * @name Session methods
@@ -1565,39 +1685,36 @@ xrt_comp_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_dat
 }
 
 /*!
- * @copydoc xrt_compositor::layer_stereo_projection
+ * @copydoc xrt_compositor::layer_projection
  *
  * Helper for calling through the function pointer.
  *
  * @public @memberof xrt_compositor
  */
 static inline xrt_result_t
-xrt_comp_layer_stereo_projection(struct xrt_compositor *xc,
-                                 struct xrt_device *xdev,
-                                 struct xrt_swapchain *l_xsc,
-                                 struct xrt_swapchain *r_xsc,
-                                 const struct xrt_layer_data *data)
+xrt_comp_layer_projection(struct xrt_compositor *xc,
+                          struct xrt_device *xdev,
+                          struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                          const struct xrt_layer_data *data)
 {
-	return xc->layer_stereo_projection(xc, xdev, l_xsc, r_xsc, data);
+	return xc->layer_projection(xc, xdev, xsc, data);
 }
 
 /*!
- * @copydoc xrt_compositor::layer_stereo_projection_depth
+ * @copydoc xrt_compositor::layer_projection_depth
  *
  * Helper for calling through the function pointer.
  *
  * @public @memberof xrt_compositor
  */
 static inline xrt_result_t
-xrt_comp_layer_stereo_projection_depth(struct xrt_compositor *xc,
-                                       struct xrt_device *xdev,
-                                       struct xrt_swapchain *l_xsc,
-                                       struct xrt_swapchain *r_xsc,
-                                       struct xrt_swapchain *l_d_xsc,
-                                       struct xrt_swapchain *r_d_xsc,
-                                       const struct xrt_layer_data *data)
+xrt_comp_layer_projection_depth(struct xrt_compositor *xc,
+                                struct xrt_device *xdev,
+                                struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+                                const struct xrt_layer_data *data)
 {
-	return xc->layer_stereo_projection_depth(xc, xdev, l_xsc, r_xsc, l_d_xsc, r_d_xsc, data);
+	return xc->layer_projection_depth(xc, xdev, xsc, d_xsc, data);
 }
 
 /*!
@@ -1682,6 +1799,19 @@ xrt_comp_layer_equirect2(struct xrt_compositor *xc,
 }
 
 /*!
+ * @copydoc xrt_compositor::layer_passthrough
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
+{
+	return xc->layer_passthrough(xc, xdev, data);
+}
+
+/*!
  * @copydoc xrt_compositor::layer_commit
  *
  * Helper for calling through the function pointer.
@@ -1747,6 +1877,27 @@ static inline xrt_result_t
 xrt_comp_set_performance_level(struct xrt_compositor *xc, enum xrt_perf_domain domain, enum xrt_perf_set_level level)
 {
 	return xc->set_performance_level(xc, domain, level);
+}
+
+/*!
+ * @copydoc xrt_compositor::get_reference_bounds_rect
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_get_reference_bounds_rect(struct xrt_compositor *xc,
+                                   enum xrt_reference_space_type reference_space_type,
+                                   struct xrt_vec2 *bounds)
+{
+	if (xc->get_reference_bounds_rect == NULL) {
+		bounds->x = 0.f;
+		bounds->y = 0.f;
+		return XRT_ERROR_COMPOSITOR_FUNCTION_NOT_IMPLEMENTED;
+	}
+
+	return xc->get_reference_bounds_rect(xc, reference_space_type, bounds);
 }
 
 /*!
@@ -2157,8 +2308,8 @@ struct xrt_system_compositor_info
 			uint32_t width_pixels;
 			uint32_t height_pixels;
 			uint32_t sample_count;
-		} max; //!< Maximums for this view.
-	} views[2];    //!< View configuration information.
+		} max;          //!< Maximums for this view.
+	} views[XRT_MAX_VIEWS]; //!< View configuration information.
 
 	//! Maximum number of composition layers supported, never changes.
 	uint32_t max_layers;

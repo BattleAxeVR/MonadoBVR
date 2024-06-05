@@ -1,9 +1,10 @@
-// Copyright 2018-2022, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  File for verifying app input into api functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -67,6 +68,16 @@ extern "C" {
 	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_hand_tracker, HTRACKER, name, new_thing->sess->sys->inst)
 #define OXR_VERIFY_FORCE_FEEDBACK_AND_INIT_LOG(log, thing, new_thing, name) \
 	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_force_feedback, FFB, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_PASSTHROUGH_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_passthrough, PASSTHROUGH, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_PASSTHROUGH_LAYER_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_passthrough_layer, PASSTHROUGH_LAYER, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_FACE_TRACKER_HTC_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_facial_tracker_htc, FTRACKER, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_body_tracker_fb, BTRACKER, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_XDEVLIST_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_xdev_list, XDEVLIST, name, new_thing->sess->sys->inst)
 // clang-format on
 
 #define OXR_VERIFY_INSTANCE_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_instance, INSTANCE);
@@ -76,6 +87,7 @@ extern "C" {
 #define OXR_VERIFY_ACTION_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_action, ACTION);
 #define OXR_VERIFY_SWAPCHAIN_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_swapchain, SWAPCHAIN);
 #define OXR_VERIFY_ACTIONSET_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_action_set, ACTIONSET);
+#define OXR_VERIFY_XDEVLIST_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_xdev_list, XDEVLIST);
 
 /*!
  * Checks if a required extension is enabled.
@@ -101,6 +113,23 @@ extern "C" {
 			return oxr_error((log), XR_ERROR_FUNCTION_UNSUPPORTED,                                         \
 			                 "Requires XR_" #mixed_case_name1 "or XR_" #mixed_case_name2                   \
 			                 " extension enabled");                                                        \
+		}                                                                                                      \
+	} while (false)
+
+/*!
+ * A condition if the instance is created with at least a given OpenXR version
+ */
+#define OXR_API_VERSION_AT_LEAST(inst, major, minor)                                                                   \
+	((inst)->openxr_version.major_minor >= XR_MAKE_VERSION(major, minor, 0))
+
+/*!
+ * Checks if the instance is created with at least a given OpenXR version
+ */
+#define OXR_VERIFY_API_VERSION_AT_LEAST(log, inst, major, minor)                                                       \
+	do {                                                                                                           \
+		if (!OXR_VERSION_AT_LEAST(inst, major, minor)) {                                                       \
+			return oxr_error((log), XR_ERROR_FUNCTION_UNSUPPORTED, "Requires OpenXR version %d.%d.x",      \
+			                 major, minor);                                                                \
 		}                                                                                                      \
 	} while (false)
 
@@ -229,6 +258,37 @@ extern "C" {
 		}                                                                                                      \
 	} while (false)
 
+#define OXR_VERIFY_PASSTHROUGH_FLAGS(log, flags)                                                                       \
+	if (flags == 0 ||                                                                                              \
+	    (flags & (XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB | XR_PASSTHROUGH_LAYER_DEPTH_BIT_FB)) == 0)         \
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,                                                     \
+		                 "flags is not a valid combination of XrPassthroughFlagBitsFB values");
+
+#define OXR_VERIFY_PASSTHROUGH_LAYER_PURPOSE(log, purpose)                                                             \
+	if ((purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB &&                                              \
+	     purpose != XR_PASSTHROUGH_LAYER_PURPOSE_PROJECTED_FB &&                                                   \
+	     purpose != XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_HANDS_FB &&                                      \
+	     purpose != XR_PASSTHROUGH_LAYER_PURPOSE_TRACKED_KEYBOARD_MASKED_HANDS_FB))                                \
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,                                                     \
+		                 "purpose is not a valid XrPassthroughLayerPurposeFB value");
+
+#define OXR_VERIFY_PASSTHROUGH_LAYER_STYLE(log, style)                                                                 \
+	do {                                                                                                           \
+		uint32_t duplicate_check = 0;                                                                          \
+		const XrPassthroughStyleFB *next = style->next;                                                        \
+		while (next) {                                                                                         \
+			if (next->type != XR_TYPE_PASSTHROUGH_COLOR_MAP_MONO_TO_RGBA_FB &&                             \
+			    next->type != XR_TYPE_PASSTHROUGH_COLOR_MAP_MONO_TO_MONO_FB &&                             \
+			    next->type != XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB)                       \
+				return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,                                     \
+				                 "style next structure chain contains invalid pointers");              \
+			if ((next->type & duplicate_check) != 0)                                                       \
+				return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,                                     \
+				                 "style next structure chain contains duplicate items");               \
+			duplicate_check |= next->type;                                                                 \
+			next = (const XrPassthroughStyleFB *)next->next;                                               \
+		}                                                                                                      \
+	} while (false)
 
 /*
  *
@@ -276,7 +336,11 @@ oxr_verify_subaction_paths_create(struct oxr_logger *log,
  * Verify a set of subaction paths for action sync.
  */
 XrResult
-oxr_verify_subaction_path_sync(struct oxr_logger *log, const struct oxr_instance *inst, XrPath path, uint32_t index);
+oxr_verify_subaction_path_sync(struct oxr_logger *log,
+                               const struct oxr_instance *inst,
+                               const struct oxr_action_set *act_set,
+                               XrPath path,
+                               uint32_t index);
 
 /*!
  * Verify a set of subaction paths for action state get.

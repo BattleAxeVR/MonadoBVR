@@ -51,13 +51,8 @@ view_index_to_projection_data(uint32_t view_index,
                               const struct xrt_layer_data *data,
                               const struct xrt_layer_projection_view_data **out_vd)
 {
-	const struct xrt_layer_stereo_projection_data *stereo = &data->stereo;
-
-	if (is_view_index_right(view_index)) {
-		*out_vd = &stereo->r;
-	} else {
-		*out_vd = &stereo->l;
-	}
+	const struct xrt_layer_projection_data *proj = &data->proj;
+	*out_vd = &proj->v[view_index];
 }
 
 static inline void
@@ -66,15 +61,9 @@ view_index_to_depth_data(uint32_t view_index,
                          const struct xrt_layer_projection_view_data **out_vd,
                          const struct xrt_layer_depth_data **out_dvd)
 {
-	const struct xrt_layer_stereo_projection_depth_data *stereo = &data->stereo_depth;
-
-	if (is_view_index_right(view_index)) {
-		*out_vd = &stereo->r;
-		*out_dvd = &stereo->r_d;
-	} else {
-		*out_vd = &stereo->l;
-		*out_dvd = &stereo->l_d;
-	}
+	const struct xrt_layer_projection_depth_data *depth = &data->depth;
+	*out_vd = &depth->v[view_index];
+	*out_dvd = &depth->d[view_index];
 }
 
 
@@ -94,8 +83,8 @@ is_layer_view_visible(const struct xrt_layer_data *data, uint32_t view_index)
 	case XRT_LAYER_EQUIRECT1: visibility = data->equirect1.visibility; break;
 	case XRT_LAYER_EQUIRECT2: visibility = data->equirect2.visibility; break;
 	case XRT_LAYER_QUAD: visibility = data->quad.visibility; break;
-	case XRT_LAYER_STEREO_PROJECTION:
-	case XRT_LAYER_STEREO_PROJECTION_DEPTH: return true;
+	case XRT_LAYER_PROJECTION:
+	case XRT_LAYER_PROJECTION_DEPTH: return true;
 	default: return false;
 	};
 

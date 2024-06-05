@@ -1,10 +1,11 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2024 Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Common protocol definition.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup ipc_shared
  */
 
@@ -131,6 +132,8 @@ struct ipc_shared_device
 	bool position_tracking_supported;
 	bool hand_tracking_supported;
 	bool eye_gaze_supported;
+	bool face_tracking_supported;
+	bool body_tracking_supported;
 	bool force_feedback_supported;
 	bool form_factor_check_supported;
 	bool stage_supported;
@@ -153,7 +156,7 @@ struct ipc_layer_entry
 	 *
 	 * How many are actually used depends on the value of @p data.type
 	 */
-	uint32_t swapchain_ids[4];
+	uint32_t swapchain_ids[XRT_MAX_VIEWS * 2];
 
 	/*!
 	 * All basic (trivially-serializable) data associated with a layer,
@@ -227,6 +230,8 @@ struct ipc_shared_memory
 	{
 		int32_t head;
 		int32_t eyes;
+		int32_t face;
+		int32_t body;
 
 		struct
 		{
@@ -257,7 +262,8 @@ struct ipc_shared_memory
 				uint32_t h_pixels;
 			} display;
 		} views[2];
-
+		// view count
+		uint32_t view_count;
 		enum xrt_blend_mode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
 		uint32_t blend_mode_count;
 	} hmd;
@@ -325,7 +331,7 @@ struct ipc_arg_swapchain_from_native
  */
 struct ipc_info_get_view_poses_2
 {
-	struct xrt_fov fovs[2];
-	struct xrt_pose poses[2];
+	struct xrt_fov fovs[XRT_MAX_VIEWS];
+	struct xrt_pose poses[XRT_MAX_VIEWS];
 	struct xrt_space_relation head_relation;
 };

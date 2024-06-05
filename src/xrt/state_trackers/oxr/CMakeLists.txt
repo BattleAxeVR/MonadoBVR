@@ -1,9 +1,19 @@
-# Copyright 2019-2022, Collabora, Ltd.
+# Copyright 2019-2024, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
 ###
 # Main code
 #
+
+add_library(oxr-interfaces INTERFACE)
+target_include_directories(
+	oxr-interfaces INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
+	)
+
+# aux_os, because oxr_objects.h includes os_threading.h
+target_link_libraries(
+	oxr-interfaces INTERFACE xrt-external-openxr aux_os Vulkan::Vulkan xrt-external-renderdoc
+	)
 
 add_library(
 	st_oxr STATIC
@@ -16,6 +26,7 @@ add_library(
 	oxr_api_swapchain.c
 	oxr_api_system.c
 	oxr_api_verify.h
+	oxr_api_xdev.c
 	oxr_binding.c
 	oxr_chain.h
 	oxr_dpad.c
@@ -43,16 +54,8 @@ add_library(
 	)
 
 if(XRT_HAVE_VULKAN)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_VULKAN)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_vk.c oxr_swapchain_vk.c oxr_vulkan.c)
 	target_link_libraries(st_oxr PUBLIC Vulkan::Vulkan)
-endif()
-
-if(XRT_HAVE_OPENGL)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_OPENGL)
-endif()
-if(XRT_HAVE_OPENGLES)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_OPENGL_ES)
 endif()
 
 if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
@@ -61,12 +64,10 @@ if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 endif()
 
 if(XRT_HAVE_OPENGL_GLX AND XRT_HAVE_XLIB)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_XLIB)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_gl_xlib.c)
 endif()
 
 if(XRT_HAVE_EGL)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_EGL)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_egl.c)
 endif()
 
@@ -76,32 +77,37 @@ if(XRT_HAVE_D3D11 OR XRT_HAVE_D3D12)
 endif()
 
 if(XRT_HAVE_D3D11)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_D3D11)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d11.c oxr_swapchain_d3d11.c oxr_d3d11.cpp)
 endif()
 
 if(XRT_HAVE_D3D12)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_GRAPHICS_API_D3D12)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d12.c oxr_swapchain_d3d12.c oxr_d3d12.cpp)
 	target_link_libraries(st_oxr PRIVATE aux_d3d)
 endif()
 
 if(ANDROID)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_ANDROID)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_gles_android.c)
 	target_link_libraries(st_oxr PRIVATE aux_android)
 endif()
+
 if(WIN32)
 	target_link_libraries(st_oxr PRIVATE kernel32)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
 endif()
 
 if(WIN32 AND XRT_HAVE_OPENGL)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_gl_win32.c)
 endif()
 
-if(WIN32)
-	target_compile_definitions(st_oxr PRIVATE XR_USE_PLATFORM_WIN32)
+if(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+	target_sources(st_oxr PRIVATE oxr_api_passthrough.c oxr_passthrough.c)
+endif()
+
+if(XRT_FEATURE_OPENXR_BODY_TRACKING_FB)
+	target_sources(st_oxr PRIVATE oxr_api_body_tracking.c oxr_body_tracking.c)
+endif()
+
+if(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC)
+	target_sources(st_oxr PRIVATE oxr_api_face_tracking.c oxr_face_tracking.c)
 endif()
 
 target_link_libraries(

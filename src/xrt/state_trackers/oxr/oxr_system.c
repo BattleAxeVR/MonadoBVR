@@ -1,9 +1,10 @@
-// Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds system related entrypoints.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
 
@@ -21,6 +22,7 @@
 #include "oxr_logger.h"
 #include "oxr_two_call.h"
 #include "oxr_chain.h"
+#include "oxr_api_verify.h"
 
 
 DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "OXR_VIEWPORT_SCALE_PERCENTAGE", 100)
@@ -83,7 +85,7 @@ oxr_system_select(struct oxr_logger *log,
 XrResult
 oxr_system_verify_id(struct oxr_logger *log, const struct oxr_instance *inst, XrSystemId systemId)
 {
-	if (systemId != 1) {
+	if (systemId != XRT_SYSTEM_ID) {
 		return oxr_error(log, XR_ERROR_SYSTEM_INVALID, "Invalid system %" PRIu64, systemId);
 	}
 	return XR_SUCCESS;
@@ -106,14 +108,22 @@ oxr_system_get_by_id(struct oxr_logger *log, struct oxr_instance *inst, XrSystem
 
 
 XrResult
-oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, struct oxr_system *sys)
+oxr_system_fill_in(
+    struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, uint32_t view_count, struct oxr_system *sys)
 {
 	//! @todo handle other subaction paths?
 
 	sys->inst = inst;
 	sys->systemId = systemId;
 	sys->form_factor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-	sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+	if (view_count == 1) {
+		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;
+	} else if (view_count == 2) {
+		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+	} else {
+		assert(false && "view_count must be 1 or 2");
+	}
+	U_LOG_D("sys->view_config_type = %d", sys->view_config_type);
 	sys->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
@@ -140,40 +150,25 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 
 	struct xrt_system_compositor_info *info = &sys->xsysc->info;
 
-	uint32_t w0 = (uint32_t)(info->views[0].recommended.width_pixels * scale);
-	uint32_t h0 = (uint32_t)(info->views[0].recommended.height_pixels * scale);
-	uint32_t w1 = (uint32_t)(info->views[1].recommended.width_pixels * scale);
-	uint32_t h1 = (uint32_t)(info->views[1].recommended.height_pixels * scale);
-
-	uint32_t w0_2 = info->views[0].max.width_pixels;
-	uint32_t h0_2 = info->views[0].max.height_pixels;
-	uint32_t w1_2 = info->views[1].max.width_pixels;
-	uint32_t h1_2 = info->views[1].max.height_pixels;
-
 #define imin(a, b) (a < b ? a : b)
+	for (uint32_t i = 0; i < view_count; ++i) {
+		uint32_t w = (uint32_t)(info->views[i].recommended.width_pixels * scale);
+		uint32_t h = (uint32_t)(info->views[i].recommended.height_pixels * scale);
+		uint32_t w_2 = info->views[i].max.width_pixels;
+		uint32_t h_2 = info->views[i].max.height_pixels;
 
-	w0 = imin(w0, w0_2);
-	h0 = imin(h0, h0_2);
-	w1 = imin(w1, w1_2);
-	h1 = imin(h1, h1_2);
+		w = imin(w, w_2);
+		h = imin(h, h_2);
+
+		sys->views[i].recommendedImageRectWidth = w;
+		sys->views[i].maxImageRectWidth = w_2;
+		sys->views[i].recommendedImageRectHeight = h;
+		sys->views[i].maxImageRectHeight = h_2;
+		sys->views[i].recommendedSwapchainSampleCount = info->views[i].recommended.sample_count;
+		sys->views[i].maxSwapchainSampleCount = info->views[i].max.sample_count;
+	}
 
 #undef imin
-
-	// clang-format off
-	sys->views[0].recommendedImageRectWidth       = w0;
-	sys->views[0].maxImageRectWidth               = w0_2;
-	sys->views[0].recommendedImageRectHeight      = h0;
-	sys->views[0].maxImageRectHeight              = h0_2;
-	sys->views[0].recommendedSwapchainSampleCount = info->views[0].recommended.sample_count;
-	sys->views[0].maxSwapchainSampleCount         = info->views[0].max.sample_count;
-
-	sys->views[1].recommendedImageRectWidth       = w1;
-	sys->views[1].maxImageRectWidth               = w1_2;
-	sys->views[1].recommendedImageRectHeight      = h1;
-	sys->views[1].maxImageRectHeight              = h1_2;
-	sys->views[1].recommendedSwapchainSampleCount = info->views[1].recommended.sample_count;
-	sys->views[1].maxSwapchainSampleCount         = info->views[1].max.sample_count;
-	// clang-format on
 
 
 	/*
@@ -204,14 +199,29 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 		sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	}
 
-#ifdef OXR_HAVE_EXT_local_floor
-	if (sys->inst->extensions.EXT_local_floor) {
+	if (OXR_API_VERSION_AT_LEAST(sys->inst, 1, 1)) {
 		if (sys->xso->semantic.local_floor != NULL) {
-			sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
+			sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR;
 		} else {
 			oxr_warn(log,
-			         "XR_EXT_local_floor enabled but system doesn't support local_floor,"
+			         "OpenXR 1.1 used but system doesn't support local_floor,"
 			         " breaking spec by not exposing the reference space.");
+		}
+	}
+
+#ifdef OXR_HAVE_EXT_local_floor
+	// If OpenXR 1.1 and the extension is enabled, don't add a second reference.
+	// Note that XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR is aliased to XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT.
+	if (!OXR_API_VERSION_AT_LEAST(sys->inst, 1, 1)) {
+		if (sys->inst->extensions.EXT_local_floor) {
+			if (sys->xso->semantic.local_floor != NULL) {
+				sys->reference_spaces[sys->reference_space_count++] =
+				    XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
+			} else {
+				oxr_warn(log,
+				         "XR_EXT_local_floor enabled but system doesn't support local_floor,"
+				         " breaking spec by not exposing the reference space.");
+			}
 		}
 	}
 #endif
@@ -226,6 +236,15 @@ oxr_system_fill_in(struct oxr_logger *log, struct oxr_instance *inst, XrSystemId
 	}
 #endif
 
+
+	/*
+	 * Misc
+	 */
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+	// By default xdev_space is implemented in the state tracker and does not need explicit system support.
+	sys->supports_xdev_space = true;
+#endif
 
 	/*
 	 * Done.
@@ -269,16 +288,69 @@ oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instanc
 	return left_supported || right_supported;
 }
 
+void
+oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
+                                         struct oxr_instance *inst,
+                                         bool *supports_eye,
+                                         bool *supports_lip)
+{
+	struct oxr_system *sys = &inst->system;
+	struct xrt_device *face_xdev = GET_XDEV_BY_ROLE(sys, face);
+
+	if (supports_eye)
+		*supports_eye = false;
+	if (supports_lip)
+		*supports_lip = false;
+
+	if (face_xdev == NULL || !face_xdev->face_tracking_supported || face_xdev->inputs == NULL) {
+		return;
+	}
+
+	for (size_t input_idx = 0; input_idx < face_xdev->input_count; ++input_idx) {
+		const struct xrt_input *input = &face_xdev->inputs[input_idx];
+		if (supports_eye != NULL && input->name == XRT_INPUT_HTC_EYE_FACE_TRACKING) {
+			*supports_eye = true;
+		}
+		if (supports_lip != NULL && input->name == XRT_INPUT_HTC_LIP_FACE_TRACKING) {
+			*supports_lip = true;
+		}
+	}
+}
+
+static bool
+oxr_system_get_body_tracking_support(struct oxr_logger *log,
+                                     struct oxr_instance *inst,
+                                     const enum xrt_input_name body_tracking_name)
+{
+	struct oxr_system *sys = &inst->system;
+	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
+	if (body == NULL || !body->body_tracking_supported || body->inputs == NULL) {
+		return false;
+	}
+
+	for (size_t input_idx = 0; input_idx < body->input_count; ++input_idx) {
+		const struct xrt_input *input = &body->inputs[input_idx];
+		if (input->name == body_tracking_name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool
+oxr_system_get_body_tracking_fb_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	return oxr_system_get_body_tracking_support(log, inst, XRT_INPUT_FB_BODY_TRACKING);
+}
+
 XrResult
 oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSystemProperties *properties)
 {
-	properties->vendorId = 42;
 	properties->systemId = sys->systemId;
+	properties->vendorId = sys->xsys->properties.vendor_id;
+	memcpy(properties->systemName, sys->xsys->properties.name, sizeof(properties->systemName));
 
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sys, head);
-
-	// The magical 247 number, is to silence warnings.
-	snprintf(properties->systemName, XR_MAX_SYSTEM_NAME_SIZE, "Monado: %.*s", 247, xdev->str);
 
 	// Get from compositor.
 	struct xrt_system_compositor_info *info = sys->xsysc ? &sys->xsysc->info : NULL;
@@ -330,6 +402,65 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		force_feedback_props->supportsForceFeedbackCurl = oxr_system_get_force_feedback_support(log, sys->inst);
 	}
 #endif
+
+#ifdef OXR_HAVE_FB_passthrough
+	XrSystemPassthroughPropertiesFB *passthrough_props = NULL;
+	XrSystemPassthroughProperties2FB *passthrough_props2 = NULL;
+	if (sys->inst->extensions.FB_passthrough) {
+		passthrough_props = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB,
+		                                              XrSystemPassthroughPropertiesFB);
+		if (passthrough_props) {
+			passthrough_props->supportsPassthrough = true;
+		}
+
+		passthrough_props2 = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB,
+		                                               XrSystemPassthroughProperties2FB);
+		if (passthrough_props2) {
+			passthrough_props2->capabilities = XR_PASSTHROUGH_CAPABILITY_BIT_FB;
+		}
+	}
+#endif
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+	XrSystemFacialTrackingPropertiesHTC *htc_facial_tracking_props = NULL;
+	if (sys->inst->extensions.HTC_facial_tracking) {
+		htc_facial_tracking_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_FACIAL_TRACKING_PROPERTIES_HTC, XrSystemFacialTrackingPropertiesHTC);
+	}
+
+	if (htc_facial_tracking_props) {
+		bool supports_eye = false;
+		bool supports_lip = false;
+		oxr_system_get_face_tracking_htc_support(log, sys->inst, &supports_eye, &supports_lip);
+		htc_facial_tracking_props->supportEyeFacialTracking = supports_eye;
+		htc_facial_tracking_props->supportLipFacialTracking = supports_lip;
+	}
+#endif // OXR_HAVE_HTC_facial_tracking
+
+#ifdef OXR_HAVE_FB_body_tracking
+	XrSystemBodyTrackingPropertiesFB *body_tracking_fb_props = NULL;
+	if (sys->inst->extensions.FB_body_tracking) {
+		body_tracking_fb_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_FB, XrSystemBodyTrackingPropertiesFB);
+	}
+
+	if (body_tracking_fb_props) {
+		body_tracking_fb_props->supportsBodyTracking = oxr_system_get_body_tracking_fb_support(log, sys->inst);
+	}
+#endif // OXR_HAVE_FB_body_tracking
+
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+	XrSystemXDevSpacePropertiesMNDX *xdev_space_props = NULL;
+	if (sys->inst->extensions.MNDX_xdev_space) {
+		xdev_space_props = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_XDEV_SPACE_PROPERTIES_MNDX,
+		                                             XrSystemXDevSpacePropertiesMNDX);
+	}
+
+	if (xdev_space_props) {
+		xdev_space_props->supportsXDevSpace = sys->supports_xdev_space;
+	}
+#endif // OXR_HAVE_MNDX_xdev_space
 
 	return XR_SUCCESS;
 }
@@ -398,7 +529,11 @@ oxr_system_enumerate_view_conf_views(struct oxr_logger *log,
 	if (viewConfigurationType != sys->view_config_type) {
 		return oxr_error(log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED, "Invalid view configuration type");
 	}
-
-	OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 2, view_configuration_view_fill_in,
-	                            sys->views, XR_SUCCESS);
+	if (sys->view_config_type == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO) {
+		OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 1,
+		                            view_configuration_view_fill_in, sys->views, XR_SUCCESS);
+	} else {
+		OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 2,
+		                            view_configuration_view_fill_in, sys->views, XR_SUCCESS);
+	}
 }

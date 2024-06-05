@@ -11,6 +11,12 @@
 		]
 	},
 
+	"system_get_properties": {
+		"out": [
+			{"name": "properties", "type": "struct xrt_system_properties"}
+		]
+	},
+
 	"system_get_client_info": {
 		"in": [
 			{"name": "id", "type": "uint32_t"}
@@ -122,6 +128,16 @@
 		],
 		"out": [
 			{"name": "relation", "type": "struct xrt_space_relation"}
+		]
+	},
+
+	"space_locate_spaces": {
+		"varlen": true,
+		"in": [
+			{"name": "base_space_id", "type": "uint32_t"},
+			{"name": "base_offset", "type": "struct xrt_pose"},
+			{"name": "space_count", "type": "uint32_t"},
+			{"name": "at_timestamp", "type": "uint64_t"}
 		]
 	},
 
@@ -238,6 +254,15 @@
 		]
 	},
 
+	"compositor_get_reference_bounds_rect": {
+		"in": [
+			{"name": "reference_space_type", "type": "enum xrt_reference_space_type"}
+		],
+		"out": [
+			{"name": "bounds", "type":  "struct xrt_vec2"}
+		]
+	},
+
 	"swapchain_get_properties": {
 		"in": [
 			{"name": "info", "type": "struct xrt_swapchain_create_info"}
@@ -259,6 +284,20 @@
 		],
 		"out_handles": {"type": "xrt_graphics_buffer_handle_t"}
 	},
+
+	"compositor_create_passthrough": {
+		"in": [
+			{"name": "info", "type": "struct xrt_passthrough_create_info"}
+		]
+	},
+
+	"compositor_create_passthrough_layer": {
+		"in": [
+			{"name": "info", "type": "struct xrt_passthrough_layer_create_info"}
+		]
+	},
+
+	"compositor_destroy_passthrough": {},
 
 	"swapchain_import": {
 		"in": [
@@ -361,7 +400,8 @@
 		"in": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "fallback_eye_relation", "type": "struct xrt_vec3"},
-			{"name": "at_timestamp_ns", "type": "uint64_t"}
+			{"name": "at_timestamp_ns", "type": "uint64_t"},
+			{"name": "view_count", "type": "uint32_t"}
 		],
 		"out": [
 			{"name": "info", "type": "struct ipc_info_get_view_poses_2"}
@@ -409,5 +449,37 @@
 		"out": [
 			{"name": "available", "type": "bool"}
 		]
+	},
+
+	"device_get_face_tracking": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "facial_expression_type", "type": "enum xrt_input_name"}
+		],
+		"out": [
+			{"name": "value", "type": "struct xrt_facial_expression_set"}
+		]
+	},
+
+	"device_get_body_skeleton": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "body_tracking_type", "type": "enum xrt_input_name"}
+		],
+		"out": [
+			{"name": "value", "type": "struct xrt_body_skeleton"}
+		]
+	},
+
+	"device_get_body_joints": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "body_tracking_type", "type": "enum xrt_input_name"},
+			{"name": "desired_timestamp_ns", "type": "uint64_t"}
+		],
+		"out": [
+			{"name": "value", "type": "struct xrt_body_joint_set"}
+		]
 	}
+
 }

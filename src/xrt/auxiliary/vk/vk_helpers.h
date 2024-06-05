@@ -57,6 +57,11 @@ struct vk_bundle
 	uint32_t queue_family_index;
 	uint32_t queue_index;
 	VkQueue queue;
+#if defined(VK_KHR_video_encode_queue)
+	uint32_t encode_queue_family_index;
+	uint32_t encode_queue_index;
+	VkQueue encode_queue;
+#endif
 
 	struct os_mutex queue_mutex;
 
@@ -129,6 +134,7 @@ struct vk_bundle
 	bool has_KHR_maintenance2;
 	bool has_KHR_maintenance3;
 	bool has_KHR_maintenance4;
+	bool has_KHR_synchronization2;
 	bool has_KHR_timeline_semaphore;
 	bool has_EXT_calibrated_timestamps;
 	bool has_EXT_display_control;
@@ -158,6 +164,9 @@ struct vk_bundle
 
 		//! Per stage limit on storage images.
 		uint32_t max_per_stage_descriptor_storage_images;
+
+		//! Was synchronization2 requested, available, and enabled?
+		bool synchronization_2;
 	} features;
 
 	//! Is the GPU a tegra device.
@@ -984,6 +993,7 @@ struct vk_device_features
 	bool shader_storage_image_write_without_format;
 	bool null_descriptor;
 	bool timeline_semaphore;
+	bool synchronization_2;
 };
 
 /*!
@@ -1668,7 +1678,7 @@ vk_create_timeline_semaphore_from_native(struct vk_bundle *vk, xrt_graphics_sync
  * equating to an epoch of 5726 seconds before overflowing. The function can
  * handle overflows happening between the given timestamps and when it is called
  * but only for one such epoch overflow, any more will only be treated as one
- * such overflow. So timestamps needs to be converted resonably soon after they
+ * such overflow. So timestamps needs to be converted reasonably soon after they
  * have been captured.
  *
  * @param vk                The Vulkan bundle.

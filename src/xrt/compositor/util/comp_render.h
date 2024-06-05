@@ -102,7 +102,7 @@ struct comp_render_view_data
  */
 struct comp_render_dispatch_data
 {
-	struct comp_render_view_data views[2];
+	struct comp_render_view_data views[XRT_MAX_VIEWS];
 
 	//! The number of views currently in this dispatch data.
 	uint32_t view_count;
@@ -324,16 +324,15 @@ comp_render_cs_layers(struct render_compute *crc,
  * layers should it not be possible to do a fast_path. Will insert barriers to
  * change the scratch images and target images to the needed layout.
  *
- * Currently limited to exactly two views.
  *
  * Expected layouts:
  * * Layer images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
- * * Sratch images: Any
+ * * Scratch images: Any
  * * Target image: Any
  *
  * After call layouts:
  * * Layer images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
- * * Sratch images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+ * * Scratch images: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
  * * Target image: VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
  *
  * @ingroup comp_util

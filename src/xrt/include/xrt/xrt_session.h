@@ -50,7 +50,7 @@ enum xrt_session_event_type
 	//! The session has been lost.
 	XRT_SESSION_EVENT_LOST = 4,
 
-	//! The referesh rate of session (compositor) has changed.
+	//! The refresh rate of session (compositor) has changed.
 	XRT_SESSION_EVENT_DISPLAY_REFRESH_RATE_CHANGE = 5,
 
 	//! A reference space for this session has a pending change.
@@ -58,6 +58,12 @@ enum xrt_session_event_type
 
 	//! The performance of the session has changed
 	XRT_SESSION_EVENT_PERFORMANCE_CHANGE = 7,
+
+	//! The passthrough state of the session has changed
+	XRT_SESSION_EVENT_PASSTHRU_STATE_CHANGE = 8,
+
+	// ! The visibility mask of given view has changed
+	XRT_SESSION_EVENT_VISIBILITY_MASK_CHANGE = 9
 };
 
 /*!
@@ -153,6 +159,24 @@ struct xrt_session_event_perf_change
 };
 
 /*!
+ * Passthrough state change event.
+ */
+struct xrt_session_event_passthrough_state_change
+{
+	enum xrt_session_event_type type;
+	enum xrt_passthrough_state state;
+};
+
+/*!
+ *  Visibility mask changed event
+ */
+struct xrt_session_event_visibility_mask_change
+{
+	enum xrt_session_event_type type;
+	uint32_t view_index;
+};
+
+/*!
  * Union of all session events, used to return multiple events through one call.
  * Each event struct must start with a @ref xrt_session_event_type field.
  *
@@ -168,6 +192,8 @@ union xrt_session_event {
 	struct xrt_session_event_display_refresh_rate_change display;
 	struct xrt_session_event_reference_space_change_pending ref_change;
 	struct xrt_session_event_perf_change performance;
+	struct xrt_session_event_passthrough_state_change passthru;
+	struct xrt_session_event_visibility_mask_change mask_change;
 };
 
 /*!
@@ -212,7 +238,7 @@ xrt_session_event_sink_push(struct xrt_session_event_sink *xses, const union xrt
  * The XRT representation of `XrSession`, this object does not have all of the
  * functionality of a session, most are partitioned to the session level
  * compositor object. Often this is @ref xrt_compositor_native, note that
- * interface may also be a system level object depending in implementor.
+ * interface may also be a system level object depending in implementer.
  *
  * @ingroup xrt_iface
  */

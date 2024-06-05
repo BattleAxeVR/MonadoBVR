@@ -1,4 +1,4 @@
-// Copyright 2018-2023, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,6 +9,8 @@
  */
 
 #pragma once
+
+#include "xrt/xrt_openxr_config.h"
 
 //! @todo Move these to the build system instead.
 #define XR_USE_TIMESPEC 1
@@ -62,5 +64,6 @@ typedef __eglMustCastToProperFunctionPointerType (*PFNEGLGETPROCADDRESSPROC)(con
 #include "openxr/openxr_loader_negotiation.h" // IWYU pragma: export
 
 #include "openxr/XR_MNDX_hydra.h"
+#include "openxr/XR_MNDX_xdev_space.h"
 #include "openxr/XR_MNDX_system_buttons.h"
 #include "openxr/XR_MNDX_ball_on_a_stick_controller.h"

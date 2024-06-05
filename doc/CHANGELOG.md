@@ -86,7 +86,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
   - Implement support for XR_KHR_composition_layer_equirect (equirect1).
     ([!620](https://gitlab.freedesktop.org/monado/monado/merge_requests/620),
     [!624](https://gitlab.freedesktop.org/monado/monado/merge_requests/624))
-  - comp: Improve thread safety. Resolve issues in mutlithreading CTS.
+  - comp: Improve thread safety. Resolve issues in multithreading CTS.
     ([!645](https://gitlab.freedesktop.org/monado/monado/merge_requests/645))
   - main: Lower priority on sRGB format. This works around a bug in the OpenXR CTS
     and mirrors better what at least on other OpenXR runtime does.
@@ -325,7 +325,7 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
     ([!509](https://gitlab.freedesktop.org/monado/monado/merge_requests/509))
   - survive: Implement haptic feedback.
     ([!557](https://gitlab.freedesktop.org/monado/monado/merge_requests/557))
-  - dummy: Tidy the code a bit and switch over to the new
+  - simulated: Tidy the code a bit and switch over to the new
     logging API.
     ([!572](https://gitlab.freedesktop.org/monado/monado/merge_requests/572),
     [!573](https://gitlab.freedesktop.org/monado/monado/merge_requests/573))
@@ -373,9 +373,9 @@ SPDX-FileCopyrightText: 2020 Collabora, Ltd. and the Monado contributors
   - compositor: Enable subimage rectangle rendering for projection layers.
     ([!436](https://gitlab.freedesktop.org/monado/monado/merge_requests/436))
   - compositor: Fix printing of current connected displays on nvidia when no
-    whitelisted display is found.
+    allowed display is found.
     ([!477](https://gitlab.freedesktop.org/monado/monado/merge_requests/477))
-  - compositor: Add env var to temporarily add display string to nvidia whitelist.
+  - compositor: Add env var to temporarily add display string to NVIDIA allowlist.
     ([!477](https://gitlab.freedesktop.org/monado/monado/merge_requests/477))
   - compositor and clients: Use a generic typedef to represent the platform-
     specific graphics buffer, allowing use of `AHardwareBuffer` on recent Android.

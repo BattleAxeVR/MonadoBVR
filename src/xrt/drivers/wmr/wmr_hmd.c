@@ -121,6 +121,7 @@ const struct wmr_headset_descriptor headset_map[] = {
     {WMR_HEADSET_LENOVO_EXPLORER, "Lenovo VR-2511N", "Lenovo Explorer", NULL, NULL, NULL},
     {WMR_HEADSET_MEDION_ERAZER_X1000, "Medion Erazer X1000", "Medion Erazer", NULL, NULL, NULL},
     {WMR_HEADSET_DELL_VISOR, "DELL VR118", "Dell Visor", NULL, NULL, NULL},
+    {WMR_HEADSET_ACER_AH101, "Acer", "AH101", NULL, NULL, NULL},
 };
 const int headset_map_n = sizeof(headset_map) / sizeof(headset_map[0]);
 
@@ -736,7 +737,7 @@ wmr_hmd_activate_reverb(struct wmr_hmd *wh)
 
 	WMR_TRACE(wh, "Activating HP Reverb G1/G2 HMD...");
 
-	// Hack to power up the Reverb G1 display, thanks to OpenHMD contibutors.
+	// Hack to power up the Reverb G1 display, thanks to OpenHMD contributors.
 	// Sleep before we start seems to improve reliability.
 	// 300ms is what Windows seems to do, so cargo cult that.
 	os_nanosleep(U_TIME_1MS_IN_NS * 300);
@@ -1441,12 +1442,13 @@ wmr_hmd_camera_project(struct wmr_hmd *wh, struct xrt_vec3 p3d)
 	float yp = y / z;
 	float rp2 = xp * xp + yp * yp;
 	float cdist = (1 + rp2 * (k1 + rp2 * (k2 + rp2 * k3))) / (1 + rp2 * (k4 + rp2 * (k5 + rp2 * k6)));
-	// If we were using OpenCV's camera model we would do
-	// float deltaX = 2 * p1 * xp * yp + p2 * (rp2 + 2 * xp * xp);
-	// float deltaY = 2 * p2 * xp * yp + p1 * (rp2 + 2 * yp * yp);
-	// But instead we use Azure Kinect model (see comment in wmr_hmd_create_stereo_camera_calib)
+#if 0 // OpenCV model
+	float deltaX = 2 * p1 * xp * yp + p2 * (rp2 + 2 * xp * xp);
+	float deltaY = 2 * p2 * xp * yp + p1 * (rp2 + 2 * yp * yp);
+#else // Azure Kinect model (see comment in wmr_hmd_create_stereo_camera_calib)
 	float deltaX = p1 * xp * yp + p2 * (rp2 + 2 * xp * xp);
 	float deltaY = p2 * xp * yp + p1 * (rp2 + 2 * yp * yp);
+#endif
 	float xpp = xp * cdist + deltaX;
 	float ypp = yp * cdist + deltaY;
 	float u = fx * xpp + cx;
@@ -1872,7 +1874,7 @@ wmr_hmd_setup_trackers(struct wmr_hmd *wh, struct xrt_slam_sinks *out_sinks, str
 	// Initialize hand tracker
 	struct xrt_slam_sinks *hand_sinks = NULL;
 	struct xrt_device *hand_device = NULL;
-	struct xrt_hand_masks_sink *masks_sink = slam_sinks->hand_masks;
+	struct xrt_hand_masks_sink *masks_sink = slam_sinks ? slam_sinks->hand_masks : NULL;
 	if (wh->tracking.hand_enabled) {
 		int hand_status = wmr_hmd_hand_track(wh, stereo_calib, masks_sink, &hand_sinks, &hand_device);
 		if (hand_status != 0 || hand_sinks == NULL || hand_device == NULL) {

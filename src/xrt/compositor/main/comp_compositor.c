@@ -46,6 +46,8 @@
 #include "xrt/xrt_config_have.h"
 #include "xrt/xrt_results.h"
 
+#include "math/m_api.h"
+
 #include "os/os_time.h"
 
 #include "util/u_var.h"
@@ -270,8 +272,8 @@ can_do_one_projection_layer_fast_path(struct comp_compositor *c)
 	enum xrt_layer_type type = layer->data.type;
 
 	// Handled by the distortion shader.
-	if (type != XRT_LAYER_STEREO_PROJECTION && //
-	    type != XRT_LAYER_STEREO_PROJECTION_DEPTH) {
+	if (type != XRT_LAYER_PROJECTION && //
+	    type != XRT_LAYER_PROJECTION_DEPTH) {
 		return false;
 	}
 
@@ -557,6 +559,9 @@ static const char *optional_device_extensions[] = {
 #ifdef VK_EXT_display_control
     VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_synchronization2
+    VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+#endif
 };
 
 static bool
@@ -614,6 +619,14 @@ compositor_init_vulkan(struct comp_compositor *c)
 	    optional_device_extensions,              //
 	    ARRAY_SIZE(optional_device_extensions)); //
 
+	// Add per target optional device extensions.
+	u_string_list_append_array(                              //
+	    optional_device_extension_list,                      //
+	    c->target_factory->optional_device_extensions,       //
+	    c->target_factory->optional_device_extension_count); //
+
+	// Select required Vulkan version, suitable for both compositor and target
+	uint32_t required_instance_version = MAX(c->target_factory->required_instance_version, VK_API_VERSION_1_0);
 
 	/*
 	 * Create the device.
@@ -621,7 +634,7 @@ compositor_init_vulkan(struct comp_compositor *c)
 
 	struct comp_vulkan_arguments vk_args = {
 	    .get_instance_proc_address = vkGetInstanceProcAddr,
-	    .required_instance_version = VK_MAKE_VERSION(1, 0, 0),
+	    .required_instance_version = required_instance_version,
 	    .required_instance_extensions = required_instance_ext_list,
 	    .optional_instance_extensions = optional_instance_ext_list,
 	    .required_device_extensions = required_device_extension_list,
@@ -951,6 +964,11 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	COMP_DEBUG(c, "Doing init %p", (void *)c);
 
+	if (xdev->hmd->view_count == 0) {
+		U_LOG_E("Bug detected: HMD \"%s\" does not set xdev->hmd.view_count. Value must be > 0!", xdev->str);
+		assert(xdev->hmd->view_count > 0);
+	}
+
 	// Do this as early as possible.
 	comp_base_init(&c->base);
 
@@ -976,13 +994,6 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	uint32_t w0 = (uint32_t)(xdev->hmd->views[0].display.w_pixels * scale);
 	uint32_t h0 = (uint32_t)(xdev->hmd->views[0].display.h_pixels * scale);
-	uint32_t w1 = (uint32_t)(xdev->hmd->views[1].display.w_pixels * scale);
-	uint32_t h1 = (uint32_t)(xdev->hmd->views[1].display.h_pixels * scale);
-
-	uint32_t w0_2 = xdev->hmd->views[0].display.w_pixels * 2;
-	uint32_t h0_2 = xdev->hmd->views[0].display.h_pixels * 2;
-	uint32_t w1_2 = xdev->hmd->views[1].display.w_pixels * 2;
-	uint32_t h1_2 = xdev->hmd->views[1].display.h_pixels * 2;
 
 	c->view_extents.width = w0;
 	c->view_extents.height = h0;
@@ -1039,8 +1050,6 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	/*
 	 * Rest of info.
 	 */
-	// Hardcoded for now.
-	uint32_t view_count = 2;
 
 	struct xrt_system_compositor_info sys_info_storage = {0};
 	struct xrt_system_compositor_info *sys_info = &sys_info_storage;
@@ -1053,19 +1062,20 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	sys_info->client_d3d_deviceLUID_valid = c->settings.client_gpu_deviceLUID_valid;
 
 	// clang-format off
-	sys_info->views[0].recommended.width_pixels  = w0;
-	sys_info->views[0].recommended.height_pixels = h0;
-	sys_info->views[0].recommended.sample_count  = 1;
-	sys_info->views[0].max.width_pixels          = w0_2;
-	sys_info->views[0].max.height_pixels         = h0_2;
-	sys_info->views[0].max.sample_count          = 1;
+	uint32_t view_count = xdev->hmd->view_count;
+	for (uint32_t i = 0; i < view_count; ++i) {
+		uint32_t w = (uint32_t)(xdev->hmd->views[i].display.w_pixels * scale);
+		uint32_t h = (uint32_t)(xdev->hmd->views[i].display.h_pixels * scale);
+		uint32_t w_2 = xdev->hmd->views[i].display.w_pixels * 2;
+		uint32_t h_2 = xdev->hmd->views[i].display.h_pixels * 2;
 
-	sys_info->views[1].recommended.width_pixels  = w1;
-	sys_info->views[1].recommended.height_pixels = h1;
-	sys_info->views[1].recommended.sample_count  = 1;
-	sys_info->views[1].max.width_pixels          = w1_2;
-	sys_info->views[1].max.height_pixels         = h1_2;
-	sys_info->views[1].max.sample_count          = 1;
+		sys_info->views[i].recommended.width_pixels  = w;
+		sys_info->views[i].recommended.height_pixels = h;
+		sys_info->views[i].recommended.sample_count  = 1;
+		sys_info->views[i].max.width_pixels          = w_2;
+		sys_info->views[i].max.height_pixels         = h_2;
+		sys_info->views[i].max.sample_count          = 1;
+	}
 	// clang-format on
 
 	// If we can add e.g. video pass-through capabilities, we may need to change (augment) this list.

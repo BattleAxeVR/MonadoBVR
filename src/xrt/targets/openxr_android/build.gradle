@@ -15,9 +15,6 @@ plugins {
     id 'kotlin-kapt'
     id 'dagger.hilt.android.plugin'
 
-    // SVG files in the "raw" resource directory will be transformed into vector drawables of the same name.
-    id 'com.quittle.svg-2-android-vector'
-
     // Use spotless to format Java and Kotlin code
     id 'com.diffplug.spotless'
 }
@@ -52,6 +49,8 @@ def parseOpenXRVersion(def fn) {
     String.join('.', components)
 }
 
+project.ext.repoRoot = file('../../../../')
+
 project.ext.renameLicense = { String name ->
     def lowerNoExtension = name.toLowerCase().replace(".txt", "")
     def result = lowerNoExtension.replaceAll(~/[\-.]/, "_") + ".txt"
@@ -68,7 +67,7 @@ project.ext.filterLicense = { String line ->
 
 project.ext.licenseDir = new File(project.buildDir, 'generated/licenses/main/res/raw')
 
-task copyLicenses(type: Copy) {
+tasks.register('copyLicenses', Copy) {
     from "${rootDir}/LICENSES/"
     include 'BSL-1.0.txt'
     rename(renameLicense)
@@ -77,13 +76,14 @@ task copyLicenses(type: Copy) {
 }
 
 // Grab Eigen if we can't find it on the system.
-task downloadEigen(type: Download) {
+tasks.register('downloadEigen', Download) {
     src "https://gitlab.com/libeigen/eigen/-/archive/${project.eigenFetchVersion}/eigen-${project.eigenFetchVersion}.tar.gz"
     dest new File(project.buildDir, "intermediates/eigenDownload/eigen-${project.eigenFetchVersion}.tar.gz")
 }
 
 def eigenUnpackDir = new File(project.buildDir, 'intermediates/eigen')
-task unpackEigen(dependsOn: downloadEigen, type: Copy) {
+tasks.register('unpackEigen', Copy) {
+    dependsOn downloadEigen
     from tarTree(downloadEigen.dest)
     into eigenUnpackDir
 }
@@ -170,7 +170,7 @@ android {
             externalNativeBuild.cmake.targets "openxr_monado"
 
             buildConfigField "boolean", "inProcess", "true"
-            resValue "string", "app_name", "Monado XR"
+            resValue "string", "app_name", "Monado In Process (Debugging)"
         }
         outOfProcess {
             dimension 'deployment'
@@ -179,7 +179,7 @@ android {
             externalNativeBuild.cmake.targets "openxr_monado", "monado-service"
 
             buildConfigField "boolean", "inProcess", "false"
-            resValue "string", "app_name", "Monado XR (Out-of-Proc)"
+            resValue "string", "app_name", "Monado XR"
         }
     }
     hilt {
@@ -202,6 +202,27 @@ android {
         fatal 'StopShip'
     }
 
+}
+
+// For signing of release binaries - env var must contain an absolute path
+// CI always does this.
+def keystorePropertiesFilename = System.getenv("MONADO_KEYSTORE_PROPERTIES")
+if (keystorePropertiesFilename) {
+    def keystorePropertiesFile = file("${keystorePropertiesFilename}")
+    if (keystorePropertiesFile.exists()) {
+        println("Signing release artifacts for monado")
+        def keystoreProperties = new Properties()
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+        android.signingConfigs {
+            release {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file("${project.repoRoot}/" + keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+        android.buildTypes.release.signingConfig android.signingConfigs.release
+    }
 }
 
 aboutLibraries {

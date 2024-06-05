@@ -670,9 +670,9 @@ err_free:
 }
 
 static VkResult
-find_compute_queue_family(struct vk_bundle *vk, uint32_t *out_compute_queue_family)
+find_queue_family(struct vk_bundle *vk, VkQueueFlags required_flags, uint32_t *out_queue_family)
 {
-	/* Find the "best" compute queue (prefer compute-only queues) */
+	/* Find the "best" queue with the requested flags (prefer queues without graphics) */
 	uint32_t queue_family_count = 0;
 	uint32_t i = 0;
 	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &queue_family_count, NULL);
@@ -687,7 +687,7 @@ find_compute_queue_family(struct vk_bundle *vk, uint32_t *out_compute_queue_fami
 	}
 
 	for (i = 0; i < queue_family_count; i++) {
-		if (~queue_family_props[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+		if ((queue_family_props[i].queueFlags & required_flags) != required_flags) {
 			continue;
 		}
 
@@ -697,20 +697,20 @@ find_compute_queue_family(struct vk_bundle *vk, uint32_t *out_compute_queue_fami
 	}
 
 	if (i >= queue_family_count) {
-		/* If there's no compute-only queue, just find any queue that supports compute */
+		/* If there's no suitable queue without graphics, just find any suitabable one*/
 		for (i = 0; i < queue_family_count; i++) {
-			if (queue_family_props[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+			if ((queue_family_props[i].queueFlags & required_flags) == required_flags) {
 				break;
 			}
 		}
 
 		if (i >= queue_family_count) {
-			VK_DEBUG(vk, "No compatible compute queue family found");
+			VK_DEBUG(vk, "No compatible queue family found (flags: 0x%xd)", required_flags);
 			goto err_free;
 		}
 	}
 
-	*out_compute_queue_family = i;
+	*out_queue_family = i;
 
 	free(queue_family_props);
 
@@ -748,6 +748,7 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 	vk->has_KHR_maintenance2 = false;
 	vk->has_KHR_maintenance3 = false;
 	vk->has_KHR_maintenance4 = false;
+	vk->has_KHR_synchronization2 = false;
 	vk->has_KHR_timeline_semaphore = false;
 	vk->has_EXT_calibrated_timestamps = false;
 	vk->has_EXT_display_control = false;
@@ -825,6 +826,13 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 			continue;
 		}
 #endif // defined(VK_KHR_maintenance4)
+
+#if defined(VK_KHR_synchronization2)
+		if (strcmp(ext, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) {
+			vk->has_KHR_synchronization2 = true;
+			continue;
+		}
+#endif // defined(VK_KHR_synchronization2)
 
 #if defined(VK_KHR_timeline_semaphore)
 		if (strcmp(ext, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) {
@@ -1015,6 +1023,13 @@ filter_device_features(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_KHR_synchronization2
+	VkPhysicalDeviceSynchronization2FeaturesKHR synchronization_2_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
+	    .pNext = NULL,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures2 physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 	    .pNext = NULL,
@@ -1031,6 +1046,13 @@ filter_device_features(struct vk_bundle *vk,
 	if (vk->has_KHR_timeline_semaphore) {
 		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
 		                      (VkBaseInStructure *)&timeline_semaphore_info);
+	}
+#endif
+
+#ifdef VK_KHR_synchronization2
+	if (vk->has_KHR_synchronization2) {
+		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                      (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
 
@@ -1052,6 +1074,11 @@ filter_device_features(struct vk_bundle *vk,
 #ifdef VK_KHR_timeline_semaphore
 	CHECK(timeline_semaphore, timeline_semaphore_info.timelineSemaphore);
 #endif
+
+#ifdef VK_KHR_synchronization2
+	CHECK(synchronization_2, synchronization_2_info.synchronization2);
+#endif
+
 	CHECK(shader_image_gather_extended, physical_device_features.features.shaderImageGatherExtended);
 
 	CHECK(shader_storage_image_write_without_format,
@@ -1065,11 +1092,13 @@ filter_device_features(struct vk_bundle *vk,
 	         "\n\tnull_descriptor: %i"
 	         "\n\tshader_image_gather_extended: %i"
 	         "\n\tshader_storage_image_write_without_format: %i"
-	         "\n\ttimeline_semaphore: %i",                               //
+	         "\n\ttimeline_semaphore: %i"
+	         "\n\tsynchronization_2: %i",                                //
 	         device_features->null_descriptor,                           //
 	         device_features->shader_image_gather_extended,              //
 	         device_features->shader_storage_image_write_without_format, //
-	         device_features->timeline_semaphore);
+	         device_features->timeline_semaphore,                        //
+	         device_features->synchronization_2);
 }
 
 
@@ -1115,6 +1144,7 @@ vk_create_device(struct vk_bundle *vk,
 	struct vk_device_features device_features = {0};
 	filter_device_features(vk, vk->physical_device, optional_device_features, &device_features);
 	vk->features.timeline_semaphore = device_features.timeline_semaphore;
+	vk->features.synchronization_2 = device_features.synchronization_2;
 
 
 	/*
@@ -1129,7 +1159,7 @@ vk_create_device(struct vk_bundle *vk,
 	}
 
 	if (only_compute) {
-		ret = find_compute_queue_family(vk, &vk->queue_family_index);
+		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &vk->queue_family_index);
 	} else {
 		ret = find_graphics_queue_family(vk, &vk->queue_family_index);
 	}
@@ -1145,13 +1175,32 @@ vk_create_device(struct vk_bundle *vk,
 	};
 
 	float queue_priority = 0.0f;
-	VkDeviceQueueCreateInfo queue_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-	    .pNext = NULL,
-	    .queueCount = 1,
-	    .queueFamilyIndex = vk->queue_family_index,
-	    .pQueuePriorities = &queue_priority,
-	};
+	VkDeviceQueueCreateInfo queue_create_info[2] = {0};
+	uint32_t queue_create_info_count = 1;
+
+	// Compute or Graphics queue
+	queue_create_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queue_create_info[0].pNext = NULL;
+	queue_create_info[0].queueCount = 1;
+	queue_create_info[0].queueFamilyIndex = vk->queue_family_index;
+	queue_create_info[0].pQueuePriorities = &queue_priority;
+
+#ifdef VK_KHR_video_encode_queue
+	// Video encode queue
+	vk->encode_queue_family_index = VK_QUEUE_FAMILY_IGNORED;
+	if (u_string_list_contains(device_ext_list, VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)) {
+		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &vk->encode_queue_family_index);
+		if (ret == VK_SUCCESS) {
+			queue_create_info[queue_create_info_count].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queue_create_info[queue_create_info_count].pNext = NULL;
+			queue_create_info[queue_create_info_count].queueCount = 1;
+			queue_create_info[queue_create_info_count].queueFamilyIndex = vk->encode_queue_family_index;
+			queue_create_info[queue_create_info_count].pQueuePriorities = &queue_priority;
+			queue_create_info_count++;
+			VK_DEBUG(vk, "Creating video encode queue, family index %d", vk->encode_queue_family_index);
+		}
+	}
+#endif
 
 #ifdef VK_KHR_global_priority
 	static_assert(VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT ==
@@ -1161,8 +1210,8 @@ vk_create_device(struct vk_bundle *vk,
 
 	if (vk->has_EXT_global_priority || vk->has_KHR_global_priority) {
 		// This is okay, see static_assert above.
-		priority_info.pNext = queue_create_info.pNext;
-		queue_create_info.pNext = (void *)&priority_info;
+		priority_info.pNext = queue_create_info[0].pNext;
+		queue_create_info[0].pNext = (void *)&priority_info;
 	}
 
 
@@ -1186,6 +1235,14 @@ vk_create_device(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_KHR_synchronization2
+	VkPhysicalDeviceSynchronization2FeaturesKHR synchronization_2_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
+	    .pNext = NULL,
+	    .synchronization2 = device_features.synchronization_2,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures enabled_features = {
 	    .shaderImageGatherExtended = device_features.shader_image_gather_extended,
 	    .shaderStorageImageWriteWithoutFormat = device_features.shader_storage_image_write_without_format,
@@ -1193,8 +1250,8 @@ vk_create_device(struct vk_bundle *vk,
 
 	VkDeviceCreateInfo device_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-	    .queueCreateInfoCount = 1,
-	    .pQueueCreateInfos = &queue_create_info,
+	    .queueCreateInfoCount = queue_create_info_count,
+	    .pQueueCreateInfos = queue_create_info,
 	    .enabledExtensionCount = u_string_list_get_size(device_ext_list),
 	    .ppEnabledExtensionNames = u_string_list_get_data(device_ext_list),
 	    .pEnabledFeatures = &enabled_features,
@@ -1210,6 +1267,13 @@ vk_create_device(struct vk_bundle *vk,
 	if (vk->has_KHR_timeline_semaphore) {
 		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
 		                      (VkBaseInStructure *)&timeline_semaphore_info);
+	}
+#endif
+
+#ifdef VK_KHR_synchronization2
+	if (vk->has_KHR_synchronization2) {
+		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                      (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
 
@@ -1237,6 +1301,11 @@ vk_create_device(struct vk_bundle *vk,
 		goto err_destroy;
 	}
 	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &vk->queue);
+#if defined(VK_KHR_video_encode_queue)
+	if (vk->encode_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
+		vk->vkGetDeviceQueue(vk->device, vk->encode_queue_family_index, 0, &vk->encode_queue);
+	}
+#endif
 
 	// Need to do this after functions have been gotten.
 	VK_NAME_INSTANCE(vk, vk->instance, "vk_bundle instance");

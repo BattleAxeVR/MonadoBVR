@@ -1,9 +1,10 @@
-// Copyright 2018-2019, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Header defining all API functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_api
  */
 
@@ -569,6 +570,127 @@ oxr_xrGetDisplayRefreshRateFB(XrSession session, float *displayRefreshRate);
 //! OpenXR API function @ep{xrRequestDisplayRefreshRateFB}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate);
+
+
+//! OpenXR API function @ep{xrLocateSpacesKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateSpacesKHR(XrSession session, const XrSpacesLocateInfoKHR *locateInfo, XrSpaceLocationsKHR *spaceLocations);
+
+//! OpenXR API function @ep{xrLocateSpaces}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateSpaces(XrSession session, const XrSpacesLocateInfo *locateInfo, XrSpaceLocations *spaceLocations);
+
+/*
+ *
+ * oxr_api_passthrough.c
+ *
+ */
+#ifdef OXR_HAVE_FB_passthrough
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateGeometryInstanceFB(XrSession session,
+                               const XrGeometryInstanceCreateInfoFB *createInfo,
+                               XrGeometryInstanceFB *outGeometryInstance);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreatePassthroughFB(XrSession session,
+                          const XrPassthroughCreateInfoFB *createInfo,
+                          XrPassthroughFB *outPassthrough);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreatePassthroughLayerFB(XrSession session,
+                               const XrPassthroughLayerCreateInfoFB *createInfo,
+                               XrPassthroughLayerFB *outLayer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyGeometryInstanceFB(XrGeometryInstanceFB instance);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyPassthroughFB(XrPassthroughFB passthrough);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyPassthroughLayerFB(XrPassthroughLayerFB layer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGeometryInstanceSetTransformFB(XrGeometryInstanceFB instance,
+                                     const XrGeometryInstanceTransformFB *transformation);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughLayerPauseFB(XrPassthroughLayerFB layer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughLayerResumeFB(XrPassthroughLayerFB layer);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughLayerSetStyleFB(XrPassthroughLayerFB layer, const XrPassthroughStyleFB *style);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughPauseFB(XrPassthroughFB passthrough);
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrPassthroughStartFB(XrPassthroughFB passthrough);
+#endif
+
+#ifdef OXR_HAVE_HTC_facial_tracking
+//! OpenXR API function @ep{xrCreateFacialTrackerHTC}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateFacialTrackerHTC(XrSession session,
+                             const XrFacialTrackerCreateInfoHTC *createInfo,
+                             XrFacialTrackerHTC *facialTracker);
+
+//! OpenXR API function @ep{xrDestroyFacialTrackerHTC}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyFacialTrackerHTC(XrFacialTrackerHTC facialTracker);
+
+//! OpenXR API function @ep{xrGetFacialExpressionsHTC}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFacialExpressionsHTC(XrFacialTrackerHTC facialTracker, XrFacialExpressionsHTC *facialExpressions);
+#endif
+
+#ifdef OXR_HAVE_FB_body_tracking
+//! OpenXR API function @ep{xrCreateBodyTrackerFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateBodyTrackerFB(XrSession session, const XrBodyTrackerCreateInfoFB *createInfo, XrBodyTrackerFB *bodyTracker);
+
+//! OpenXR API function @ep{xrDestroyBodyTrackerFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyBodyTrackerFB(XrBodyTrackerFB bodyTracker);
+
+//! OpenXR API function @ep{xrGetBodySkeletonFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetBodySkeletonFB(XrBodyTrackerFB bodyTracker, XrBodySkeletonFB *skeleton);
+
+//! OpenXR API function @ep{xrLocateBodyJointsFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateBodyJointsFB(XrBodyTrackerFB bodyTracker,
+                         const XrBodyJointsLocateInfoFB *locateInfo,
+                         XrBodyJointLocationsFB *locations);
+#endif
+
+
+/*
+ *
+ * oxr_api_xdev.c
+ *
+ */
+
+#ifdef OXR_HAVE_MNDX_xdev_space
+//! OpenXR API function @ep{xrCreateXDevListMNDX}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateXDevListMNDX(XrSession session, const XrCreateXDevListInfoMNDX *info, XrXDevListMNDX *xdevList);
+
+//! OpenXR API function @ep{xrGetXDevListGenerationNumberMNDX}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetXDevListGenerationNumberMNDX(XrXDevListMNDX session, uint64_t *outGeneration);
+
+//! OpenXR API function @ep{xrEnumerateXDevsMNDX}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnumerateXDevsMNDX(XrXDevListMNDX xdevList,
+                         uint32_t xdevCapacityInput,
+                         uint32_t *xdevCountOutput,
+                         XrXDevIdMNDX *xdevs);
+
+//! OpenXR API function @ep{xrGetXDevProperty}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetXDevPropertiesMNDX(XrXDevListMNDX xdevList, const XrGetXDevInfoMNDX *info, XrXDevPropertiesMNDX *properties);
+
+//! OpenXR API function @ep{xrDestroyXDevListMNDX}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyXDevListMNDX(XrXDevListMNDX xdevList);
+
+//! OpenXR API function @ep{xrCreateXDevSpace}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateXDevSpaceMNDX(XrSession session, const XrCreateXDevSpaceInfoMNDX *createInfo, XrSpace *space);
+#endif
+
 
 /*!
  * @}

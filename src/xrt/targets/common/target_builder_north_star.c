@@ -308,7 +308,7 @@ ns_setup_depthai_device(struct ns_builder *nsb,
 
 #ifdef XRT_BUILD_DRIVER_HANDTRACKING
 	struct xrt_slam_sinks *hand_sinks = NULL;
-	struct xrt_hand_masks_sink *masks_sink = slam_sinks->hand_masks;
+	struct xrt_hand_masks_sink *masks_sink = slam_sinks ? slam_sinks->hand_masks : NULL;
 
 	struct t_camera_extra_info extra_camera_info = {0};
 
@@ -356,17 +356,17 @@ ns_setup_depthai_device(struct ns_builder *nsb,
 	    .gt = slam_sinks->gt,
 	};
 
-	struct xrt_slam_sinks dummy_slam_sinks = {0};
-	dummy_slam_sinks.imu = entry_sinks.imu;
+	struct xrt_slam_sinks unused_slam_sinks = {0};
+	unused_slam_sinks.imu = entry_sinks.imu;
 
-	u_sink_force_genlock_create(    //
-	    xfctx,                      //
-	    entry_sinks.cams[0],        //
-	    entry_sinks.cams[1],        //
-	    &dummy_slam_sinks.cams[0],  //
-	    &dummy_slam_sinks.cams[1]); //
+	u_sink_force_genlock_create(     //
+	    xfctx,                       //
+	    entry_sinks.cams[0],         //
+	    entry_sinks.cams[1],         //
+	    &unused_slam_sinks.cams[0],  //
+	    &unused_slam_sinks.cams[1]); //
 
-	xrt_fs_slam_stream_start(the_fs, &dummy_slam_sinks);
+	xrt_fs_slam_stream_start(the_fs, &unused_slam_sinks);
 
 	return XRT_SUCCESS;
 }
@@ -543,7 +543,6 @@ ns_open_system_impl(struct xrt_builder *xb,
 	struct xrt_device *head_wrap = NULL;
 
 	if (slam_device != NULL) {
-		xsysd->xdevs[xsysd->xdev_count++] = slam_device;
 		head_wrap = multi_create_tracking_override(XRT_TRACKING_OVERRIDE_DIRECT, ns_hmd, slam_device,
 		                                           XRT_INPUT_GENERIC_TRACKER_POSE, &head_offset);
 	} else {
@@ -555,6 +554,10 @@ ns_open_system_impl(struct xrt_builder *xb,
 	struct xrt_device *left = NULL, *right = NULL;
 	struct xrt_device *left_ht = NULL, *right_ht = NULL;
 	xsysd->xdevs[xsysd->xdev_count++] = head_wrap;
+
+	// Add slam device after HMD:
+	if (slam_device != NULL)
+		xsysd->xdevs[xsysd->xdev_count++] = slam_device;
 
 	if (hand_device != NULL) {
 		// note: hand_parented_to_head_tracker is always false when slam_device is NULL

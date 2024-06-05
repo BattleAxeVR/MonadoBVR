@@ -12,6 +12,7 @@
 #include "util/u_debug.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
+#include "math/m_vec2.h"
 
 #include "xrt/xrt_compiler.h"
 
@@ -76,6 +77,39 @@ oxr_action_bind_io(struct oxr_logger *log,
                    struct oxr_action_cache *cache,
                    struct oxr_interaction_profile *profile,
                    enum oxr_subaction_path subaction_path);
+
+/*!
+ * Helper function to combine @ref oxr_subaction_paths structs, but skipping
+ * @ref oxr_subaction_paths::any.
+ *
+ * If a real (non-"any") subaction path in @p new_subaction_paths is true, it will be
+ * true in @p subaction_paths.
+ *
+ * @private @memberof oxr_subaction_paths
+ */
+static inline void
+oxr_subaction_paths_accumulate_except_any(struct oxr_subaction_paths *subaction_paths,
+                                          const struct oxr_subaction_paths *new_subaction_paths)
+{
+#define ACCUMULATE_SUBACTION_PATHS(X) subaction_paths->X |= new_subaction_paths->X;
+	OXR_FOR_EACH_SUBACTION_PATH(ACCUMULATE_SUBACTION_PATHS)
+#undef ACCUMULATE_SUBACTION_PATHS
+}
+
+/*!
+ * Helper function to combine @ref oxr_subaction_paths structs.
+ *
+ * If a subaction path in @p new_subaction_paths is true, it will be true in @p subaction_paths.
+ *
+ * @private @memberof oxr_subaction_paths
+ */
+static inline void
+oxr_subaction_paths_accumulate(struct oxr_subaction_paths *subaction_paths,
+                               const struct oxr_subaction_paths *new_subaction_paths)
+{
+	subaction_paths->any |= new_subaction_paths->any;
+	oxr_subaction_paths_accumulate_except_any(subaction_paths, new_subaction_paths);
+}
 
 /*
  *
@@ -260,6 +294,7 @@ oxr_action_set_create(struct oxr_logger *log,
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, act_set, OXR_XR_DEBUG_ACTIONSET, oxr_action_set_destroy_cb, &inst->handle);
 
 	struct oxr_action_set_ref *act_set_ref = U_TYPED_CALLOC(struct oxr_action_set_ref);
+	act_set_ref->permitted_subaction_paths.any = true;
 	act_set_ref->base.destroy = oxr_action_set_ref_destroy_cb;
 	oxr_refcounted_ref(&act_set_ref->base);
 	act_set->data = act_set_ref;
@@ -364,6 +399,17 @@ oxr_action_create(struct oxr_logger *log,
 	act->act_set = act_set;
 	act_ref->subaction_paths = subaction_paths;
 	act_ref->action_type = createInfo->actionType;
+	act_ref->subaction_paths = subaction_paths;
+
+	// Any subaction paths allowed for this action are allowed for this
+	// action set. But, do not accumulate "any" - it just means none were
+	// specified for this action.
+	oxr_subaction_paths_accumulate_except_any(&(act_set->data->permitted_subaction_paths), &subaction_paths);
+
+	// Any subaction paths allowed for this action are allowed for this
+	// action set. But, do not accumulate "any" - it just means none were
+	// specified for this action.
+	oxr_subaction_paths_accumulate_except_any(&(act_set->data->permitted_subaction_paths), &subaction_paths);
 
 	snprintf(act_ref->name, sizeof(act_ref->name), "%s", createInfo->actionName);
 
@@ -1034,6 +1080,12 @@ oxr_input_combine_input(struct oxr_session *sess,
 		case XRT_INPUT_TYPE_HAND_TRACKING:
 			// shouldn't be possible to get here
 			break;
+		case XRT_INPUT_TYPE_FACE_TRACKING:
+			// shouldn't be possible to get here
+			break;
+		case XRT_INPUT_TYPE_BODY_TRACKING:
+			// shouldn't be possible to get here
+			break;
 		}
 	}
 
@@ -1076,7 +1128,7 @@ oxr_action_cache_update(struct oxr_logger *log,
 	/* a cache can only have outputs or inputs, not both */
 	if (cache->output_count > 0) {
 		cache->current.active = true;
-		if (cache->stop_output_time < time) {
+		if (cache->stop_output_time > 0 && cache->stop_output_time < time) {
 			oxr_action_cache_stop_output(log, sess, cache);
 		}
 	} else if (cache->input_count > 0) {
@@ -1165,33 +1217,66 @@ oxr_action_cache_update(struct oxr_logger *log,
 	}
 }
 
-#define BOOL_CHECK(NAME)                                                                                               \
-	if (act_attached->NAME.current.active) {                                                                       \
-		active |= true;                                                                                        \
-		value |= act_attached->NAME.current.value.boolean;                                                     \
-		timestamp = act_attached->NAME.current.timestamp;                                                      \
+static inline bool
+oxr_state_equal_bool(const struct oxr_action_state *a, const struct oxr_action_state *b)
+{
+	return a->value.boolean == b->value.boolean;
+}
+
+static inline bool
+oxr_state_equal_vec1(const struct oxr_action_state *a, const struct oxr_action_state *b)
+{
+	return a->value.vec1.x == b->value.vec1.x;
+}
+
+static inline bool
+oxr_state_equal_vec2(const struct oxr_action_state *a, const struct oxr_action_state *b)
+{
+	return (a->value.vec2.x == b->value.vec2.x) && (a->value.vec2.y == b->value.vec2.y);
+}
+
+static inline void
+oxr_state_update_bool(bool *active, bool *value, XrTime *timestamp, const struct oxr_action_state *new_state)
+{
+	if (new_state->active) {
+		*active |= true;
+		*value |= new_state->value.boolean;
+		*timestamp = new_state->timestamp;
 	}
-#define VEC1_CHECK(NAME)                                                                                               \
-	if (act_attached->NAME.current.active) {                                                                       \
-		active |= true;                                                                                        \
-		if (value < act_attached->NAME.current.value.vec1.x) {                                                 \
-			value = act_attached->NAME.current.value.vec1.x;                                               \
-			timestamp = act_attached->NAME.current.timestamp;                                              \
-		}                                                                                                      \
+}
+#define BOOL_CHECK(NAME) oxr_state_update_bool(&active, &value, &timestamp, &act_attached->NAME.current);
+
+static inline void
+oxr_state_update_vec1(bool *active, float *value, XrTime *timestamp, const struct oxr_action_state *new_state)
+{
+	if (new_state->active) {
+		*active |= true;
+		if (*value < new_state->value.vec1.x) {
+			*value = new_state->value.vec1.x;
+			*timestamp = new_state->timestamp;
+		}
 	}
-#define VEC2_CHECK(NAME)                                                                                               \
-	if (act_attached->NAME.current.active) {                                                                       \
-		active |= true;                                                                                        \
-		float curr_x = act_attached->NAME.current.value.vec2.x;                                                \
-		float curr_y = act_attached->NAME.current.value.vec2.y;                                                \
-		float curr_d = curr_x * curr_x + curr_y * curr_y;                                                      \
-		if (distance < curr_d) {                                                                               \
-			x = curr_x;                                                                                    \
-			y = curr_y;                                                                                    \
-			distance = curr_d;                                                                             \
-			timestamp = act_attached->NAME.current.timestamp;                                              \
-		}                                                                                                      \
+}
+#define VEC1_CHECK(NAME) oxr_state_update_vec1(&active, &value, &timestamp, &act_attached->NAME.current);
+
+static inline void
+oxr_state_update_vec2(
+    bool *active, float *x, float *y, float *distance, XrTime *timestamp, const struct oxr_action_state *new_state)
+{
+	if (new_state->active) {
+		*active |= true;
+		float curr_x = new_state->value.vec2.x;
+		float curr_y = new_state->value.vec2.y;
+		float curr_d = curr_x * curr_x + curr_y * curr_y;
+		if (*distance < curr_d) {
+			*x = curr_x;
+			*y = curr_y;
+			*distance = curr_d;
+			*timestamp = new_state->timestamp;
+		}
 	}
+}
+#define VEC2_CHECK(NAME) oxr_state_update_vec2(&active, &x, &y, &distance, &timestamp, &act_attached->NAME.current);
 
 /*!
  * Called during each xrSyncActions.
@@ -1231,14 +1316,15 @@ oxr_action_attachment_update(struct oxr_logger *log,
 	bool active = false;
 	bool changed = false;
 	XrTime timestamp = time_state_monotonic_to_ts_ns(sess->sys->inst->timekeeping, time);
+	U_ZERO(&act_attached->any_state);
 
 	switch (act_attached->act_ref->action_type) {
 	case XR_ACTION_TYPE_BOOLEAN_INPUT: {
 		bool value = false;
 		OXR_FOR_EACH_VALID_SUBACTION_PATH(BOOL_CHECK)
 
-		changed = (last.value.boolean != value);
 		act_attached->any_state.value.boolean = value;
+		changed = active && !oxr_state_equal_bool(&last, &act_attached->any_state);
 		break;
 	}
 	case XR_ACTION_TYPE_FLOAT_INPUT: {
@@ -1246,8 +1332,8 @@ oxr_action_attachment_update(struct oxr_logger *log,
 		float value = -2.0f; // NOLINT
 		OXR_FOR_EACH_VALID_SUBACTION_PATH(VEC1_CHECK)
 
-		changed = last.value.vec1.x != value;
 		act_attached->any_state.value.vec1.x = value;
+		changed = active && !oxr_state_equal_vec1(&last, &act_attached->any_state);
 		break;
 	}
 	case XR_ACTION_TYPE_VECTOR2F_INPUT: {
@@ -1256,9 +1342,9 @@ oxr_action_attachment_update(struct oxr_logger *log,
 		float distance = -1.0f;
 		OXR_FOR_EACH_VALID_SUBACTION_PATH(VEC2_CHECK)
 
-		changed = (last.value.vec2.x != x) || (last.value.vec2.y != y);
 		act_attached->any_state.value.vec2.x = x;
 		act_attached->any_state.value.vec2.y = y;
+		changed = active && !oxr_state_equal_vec2(&last, &act_attached->any_state);
 		break;
 	}
 	default:
@@ -1269,25 +1355,23 @@ oxr_action_attachment_update(struct oxr_logger *log,
 		return;
 	}
 
-	if (!active) {
-		U_ZERO(&act_attached->any_state);
-	} else if (last.active && changed) {
+	act_attached->any_state.active = active;
+	// We're only changed if the value differs and we're not newly
+	// active.
+	act_attached->any_state.changed = last.active && changed;
+	if (active) {
 		act_attached->any_state.timestamp = timestamp;
-		act_attached->any_state.changed = true;
-		act_attached->any_state.active = true;
-	} else if (last.active) {
-		act_attached->any_state.timestamp = last.timestamp;
-		act_attached->any_state.changed = false;
-		act_attached->any_state.active = true;
-	} else {
-		act_attached->any_state.timestamp = timestamp;
-		act_attached->any_state.changed = false;
-		act_attached->any_state.active = true;
+		if (!act_attached->any_state.changed && last.active) {
+			// Use old timestamp if we're unchanged, but were active
+			// last sync
+			act_attached->any_state.timestamp = last.timestamp;
+		}
 	}
 }
+
 /*!
- * Try to produce a transform chain to convert the available input into the
- * desired input type.
+ * Try to produce a transform chain to convert the available input into
+ * the desired input type.
  *
  * Populates @p action_input->transforms and @p action_input->transform_count on
  * success.
@@ -1319,6 +1403,7 @@ oxr_action_populate_input_transform(struct oxr_logger *log,
 	    &action_input->transforms,           //
 	    &action_input->transform_count);     //
 }
+
 /*!
  * Find dpad settings in @p dpad_entry whose binding path
  * is a prefix of @p bound_path_string.
@@ -1348,8 +1433,8 @@ find_matching_dpad(struct oxr_logger *log,
 }
 
 /*!
- * Try to produce a transform chain to create a dpad button from the selected input
- * (potentially using other inputs like `/force` in the process)
+ * Try to produce a transform chain to create a dpad button from the selected
+ * input (potentially using other inputs like `/force` in the process).
  *
  * Populates @p action_input->transforms and @p action_input->transform_count on
  * success.
@@ -1541,7 +1626,8 @@ oxr_action_bind_io(struct oxr_logger *log,
  */
 
 /*!
- * Given an Action Set handle, return the @ref oxr_action_set and the associated
+ * Given an Action Set handle, return the @ref oxr_action_set and the
+ * associated
  * @ref oxr_action_set_attachment in the given Session.
  *
  * @private @memberof oxr_session
@@ -1568,8 +1654,8 @@ oxr_session_get_action_set_attachment(struct oxr_session *sess,
 }
 
 /*!
- * Given an action act_key, look up the @ref oxr_action_attachment of the
- * associated action in the given Session.
+ * Given an action act_key, look up the @ref oxr_action_attachment of
+ * the associated action in the given Session.
  *
  * @private @memberof oxr_session
  */
@@ -1737,7 +1823,8 @@ oxr_action_sync_data(struct oxr_logger *log,
 		U_ZERO(&act_set_attached->requested_subaction_paths);
 	}
 
-	// Go over all requested action sets and update their attachment.
+	// Go over all requested action sets and update their
+	// attachment.
 	//! @todo can be listed more than once with different paths!
 	for (uint32_t i = 0; i < countActionSets; i++) {
 		struct oxr_subaction_paths subaction_paths;
@@ -1749,15 +1836,11 @@ oxr_action_sync_data(struct oxr_logger *log,
 			return XR_ERROR_PATH_UNSUPPORTED;
 		}
 
-		act_set_attached->requested_subaction_paths.any |= subaction_paths.any;
 
 		/* never error when requesting any subactionpath */
 		bool any_action_with_subactionpath = subaction_paths.any;
 
-#define ACCUMULATE_REQUESTED(X) act_set_attached->requested_subaction_paths.X |= subaction_paths.X;
-
-		OXR_FOR_EACH_SUBACTION_PATH(ACCUMULATE_REQUESTED)
-#undef ACCUMULATE_REQUESTED
+		oxr_subaction_paths_accumulate(&(act_set_attached->requested_subaction_paths), &subaction_paths);
 
 		/* check if we have at least one action for requested subactionpath */
 		for (uint32_t k = 0; k < act_set_attached->action_attachment_count; k++) {

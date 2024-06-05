@@ -1,10 +1,11 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Header defining an xrt display or controller device.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Moses Turner <mosesturner@protonmail.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup xrt_iface
  */
 
@@ -12,7 +13,7 @@
 
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_visibility_mask.h"
-
+#include "xrt/xrt_limits.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,8 +107,9 @@ struct xrt_hmd_parts
 	 *
 	 * For now hardcoded display to two.
 	 */
-	struct xrt_view views[2];
+	struct xrt_view views[XRT_MAX_VIEWS];
 
+	size_t view_count;
 	/*!
 	 * Array of supported blend modes.
 	 */
@@ -138,15 +140,15 @@ struct xrt_hmd_parts
 			//! Indices, for triangle strip.
 			int *indices;
 			//! Number of indices for the triangle strips (one per view).
-			uint32_t index_counts[2];
+			uint32_t index_counts[XRT_MAX_VIEWS];
 			//! Offsets for the indices (one offset per view).
-			uint32_t index_offsets[2];
+			uint32_t index_offsets[XRT_MAX_VIEWS];
 			//! Total number of elements in mesh::indices array.
 			uint32_t index_count_total;
 		} mesh;
 
 		//! distortion is subject to the field of view
-		struct xrt_fov fov[2];
+		struct xrt_fov fov[XRT_MAX_VIEWS];
 	} distortion;
 };
 
@@ -265,7 +267,8 @@ struct xrt_device
 	bool ref_space_usage_supported;
 	bool form_factor_check_supported;
 	bool stage_supported;
-
+	bool face_tracking_supported;
+	bool body_tracking_supported;
 
 	/*
 	 *
@@ -339,6 +342,51 @@ struct xrt_device
 	                          uint64_t *out_timestamp_ns);
 
 	/*!
+	 * @brief Get the requested blend shape properties & weights for a face tracker
+	 *
+	 * @param[in] xdev                    The device.
+	 * @param[in] facial_expression_type  The facial expression data type (XR_FB_face_tracking,
+	 * XR_HTC_facial_tracking, etc).
+	 * @param[in] out_value               Set of requested expression weights & blend shape properties.
+	 *
+	 * @see xrt_input_name
+	 */
+	xrt_result_t (*get_face_tracking)(struct xrt_device *xdev,
+	                                  enum xrt_input_name facial_expression_type,
+	                                  struct xrt_facial_expression_set *out_value);
+
+	/*!
+	 * @brief Get the body skeleton in T-pose, used to query the skeleton hierarchy, scale, proportions etc
+	 *
+	 * @param[in] xdev                    The device.
+	 * @param[in] body_tracking_type      The body joint set type (XR_FB_body_tracking,
+	 * XR_META_body_tracking_full_body, etc).
+	 * @param[in] out_value               The body skeleton hierarchy/properties.
+	 *
+	 * @see xrt_input_name
+	 */
+	xrt_result_t (*get_body_skeleton)(struct xrt_device *xdev,
+	                                  enum xrt_input_name body_tracking_type,
+	                                  struct xrt_body_skeleton *out_value);
+
+	/*!
+	 * @brief Get the joint locations for a body tracker
+	 *
+	 * @param[in] xdev                    The device.
+	 * @param[in] body_tracking_type      The body joint set type (XR_FB_body_tracking,
+	 * XR_META_body_tracking_full_body, etc).
+	 * @param[in] desired_timestamp_ns    If the device can predict or has a history
+	 *                                    of locations, this is when the caller
+	 * @param[in] out_value               Set of body joint locations & properties.
+	 *
+	 * @see xrt_input_name
+	 */
+	xrt_result_t (*get_body_joints)(struct xrt_device *xdev,
+	                                enum xrt_input_name body_tracking_type,
+	                                uint64_t desired_timestamp_ns,
+	                                struct xrt_body_joint_set *out_value);
+
+	/*!
 	 * Set a output value.
 	 *
 	 * @param[in] xdev           The device.
@@ -392,6 +440,7 @@ struct xrt_device
 	                       struct xrt_space_relation *out_head_relation,
 	                       struct xrt_fov *out_fovs,
 	                       struct xrt_pose *out_poses);
+
 	/**
 	 * Compute the distortion at a single point.
 	 *
@@ -508,6 +557,58 @@ xrt_device_get_hand_tracking(struct xrt_device *xdev,
 }
 
 /*!
+ * Helper function for @ref xrt_device::get_face_tracking.
+ *
+ * @copydoc xrt_device::get_face_tracking
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_get_face_tracking(struct xrt_device *xdev,
+                             enum xrt_input_name facial_expression_type,
+                             struct xrt_facial_expression_set *out_value)
+{
+	return xdev->get_face_tracking(xdev, facial_expression_type, out_value);
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_body_skeleton.
+ *
+ * @copydoc xrt_device::get_body_skeleton
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_get_body_skeleton(struct xrt_device *xdev,
+                             enum xrt_input_name body_tracking_type,
+                             struct xrt_body_skeleton *out_value)
+{
+	if (xdev->get_body_skeleton == NULL) {
+		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
+	}
+	return xdev->get_body_skeleton(xdev, body_tracking_type, out_value);
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_body_joints.
+ *
+ * @copydoc xrt_device::get_body_joints
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_get_body_joints(struct xrt_device *xdev,
+                           enum xrt_input_name body_tracking_type,
+                           uint64_t desired_timestamp_ns,
+                           struct xrt_body_joint_set *out_value)
+{
+	if (xdev->get_body_joints == NULL) {
+		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
+	}
+	return xdev->get_body_joints(xdev, body_tracking_type, desired_timestamp_ns, out_value);
+}
+
+/*!
  * Helper function for @ref xrt_device::set_output.
  *
  * @copydoc xrt_device::set_output
@@ -566,6 +667,10 @@ xrt_device_get_visibility_mask(struct xrt_device *xdev,
                                uint32_t view_index,
                                struct xrt_visibility_mask **out_mask)
 {
+
+	if (xdev->get_visibility_mask == NULL) {
+		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
+	}
 	return xdev->get_visibility_mask(xdev, type, view_index, out_mask);
 }
 
