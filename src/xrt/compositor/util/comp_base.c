@@ -1,18 +1,22 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Helper implementation for native compositors.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup comp_util
  */
 
+#include "util/comp_layer_accum.h"
+#include "util/comp_sync.h"
 #include "util/u_wait.h"
 #include "util/u_trace_marker.h"
 
 #include "util/comp_base.h"
 #include "util/comp_semaphore.h"
+#include "xrt/xrt_compositor.h"
 
 
 /*
@@ -21,26 +25,6 @@
  *
  */
 
-static xrt_result_t
-do_single_layer(struct xrt_compositor *xc,
-                struct xrt_device *xdev,
-                struct xrt_swapchain *xsc,
-                const struct xrt_layer_data *data)
-{
-	struct comp_base *cb = comp_base(xc);
-
-	uint32_t layer_id = cb->slot.layer_count;
-
-	struct comp_layer *layer = &cb->slot.layers[layer_id];
-	layer->sc_array[0] = comp_swapchain(xsc);
-	layer->sc_array[1] = NULL;
-	layer->data = *data;
-
-	cb->slot.layer_count++;
-
-	return XRT_SUCCESS;
-}
-
 
 /*
  *
@@ -48,6 +32,7 @@ do_single_layer(struct xrt_compositor *xc,
  *
  */
 
+//! Delegates to code in `comp_swapchain`
 static xrt_result_t
 base_get_swapchain_create_properties(struct xrt_compositor *xc,
                                      const struct xrt_swapchain_create_info *info,
@@ -56,6 +41,7 @@ base_get_swapchain_create_properties(struct xrt_compositor *xc,
 	return comp_swapchain_get_create_properties(info, xsccp);
 }
 
+//! Delegates to code in `comp_swapchain`
 static xrt_result_t
 base_create_swapchain(struct xrt_compositor *xc,
                       const struct xrt_swapchain_create_info *info,
@@ -73,6 +59,7 @@ base_create_swapchain(struct xrt_compositor *xc,
 	return comp_swapchain_create(&cb->vk, &cb->cscs, info, &xsccp, out_xsc);
 }
 
+//! Delegates to code in `comp_swapchain`
 static xrt_result_t
 base_import_swapchain(struct xrt_compositor *xc,
                       const struct xrt_swapchain_create_info *info,
@@ -85,6 +72,7 @@ base_import_swapchain(struct xrt_compositor *xc,
 	return comp_swapchain_import(&cb->vk, &cb->cscs, info, native_images, image_count, out_xsc);
 }
 
+//! Delegates to code in `comp_sync`
 static xrt_result_t
 base_import_fence(struct xrt_compositor *xc, xrt_graphics_sync_handle_t handle, struct xrt_compositor_fence **out_xcf)
 {
@@ -93,6 +81,7 @@ base_import_fence(struct xrt_compositor *xc, xrt_graphics_sync_handle_t handle, 
 	return comp_fence_import(&cb->vk, handle, out_xcf);
 }
 
+//! Delegates to code in `comp_semaphore`
 static xrt_result_t
 base_create_semaphore(struct xrt_compositor *xc,
                       xrt_graphics_sync_handle_t *out_handle,
@@ -107,11 +96,7 @@ static xrt_result_t
 base_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
-
-	cb->slot.data = *data;
-	cb->slot.layer_count = 0;
-
-	return XRT_SUCCESS;
+	return comp_layer_accum_begin(&cb->layer_accum, data);
 }
 
 static xrt_result_t
@@ -121,19 +106,7 @@ base_layer_projection(struct xrt_compositor *xc,
                       const struct xrt_layer_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
-
-	uint32_t layer_id = cb->slot.layer_count;
-
-	struct comp_layer *layer = &cb->slot.layers[layer_id];
-	assert(ARRAY_SIZE(layer->sc_array) >= data->view_count);
-	for (uint32_t i = 0; i < data->view_count; ++i) {
-		layer->sc_array[i] = comp_swapchain(xsc[i]);
-	}
-	layer->data = *data;
-
-	cb->slot.layer_count++;
-
-	return XRT_SUCCESS;
+	return comp_layer_accum_projection(&cb->layer_accum, xsc, data);
 }
 
 static xrt_result_t
@@ -144,19 +117,7 @@ base_layer_projection_depth(struct xrt_compositor *xc,
                             const struct xrt_layer_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
-
-	uint32_t layer_id = cb->slot.layer_count;
-
-	struct comp_layer *layer = &cb->slot.layers[layer_id];
-	for (uint32_t i = 0; i < data->view_count; ++i) {
-		layer->sc_array[i] = comp_swapchain(xsc[i]);
-		layer->sc_array[i + data->view_count] = comp_swapchain(d_xsc[i]);
-	}
-	layer->data = *data;
-
-	cb->slot.layer_count++;
-
-	return XRT_SUCCESS;
+	return comp_layer_accum_projection_depth(&cb->layer_accum, xsc, d_xsc, data);
 }
 
 static xrt_result_t
@@ -165,7 +126,8 @@ base_layer_quad(struct xrt_compositor *xc,
                 struct xrt_swapchain *xsc,
                 const struct xrt_layer_data *data)
 {
-	return do_single_layer(xc, xdev, xsc, data);
+	struct comp_base *cb = comp_base(xc);
+	return comp_layer_accum_quad(&cb->layer_accum, xsc, data);
 }
 
 static xrt_result_t
@@ -174,7 +136,8 @@ base_layer_cube(struct xrt_compositor *xc,
                 struct xrt_swapchain *xsc,
                 const struct xrt_layer_data *data)
 {
-	return do_single_layer(xc, xdev, xsc, data);
+	struct comp_base *cb = comp_base(xc);
+	return comp_layer_accum_cube(&cb->layer_accum, xsc, data);
 }
 
 static xrt_result_t
@@ -183,7 +146,8 @@ base_layer_cylinder(struct xrt_compositor *xc,
                     struct xrt_swapchain *xsc,
                     const struct xrt_layer_data *data)
 {
-	return do_single_layer(xc, xdev, xsc, data);
+	struct comp_base *cb = comp_base(xc);
+	return comp_layer_accum_cylinder(&cb->layer_accum, xsc, data);
 }
 
 static xrt_result_t
@@ -192,7 +156,8 @@ base_layer_equirect1(struct xrt_compositor *xc,
                      struct xrt_swapchain *xsc,
                      const struct xrt_layer_data *data)
 {
-	return do_single_layer(xc, xdev, xsc, data);
+	struct comp_base *cb = comp_base(xc);
+	return comp_layer_accum_equirect1(&cb->layer_accum, xsc, data);
 }
 
 static xrt_result_t
@@ -201,22 +166,23 @@ base_layer_equirect2(struct xrt_compositor *xc,
                      struct xrt_swapchain *xsc,
                      const struct xrt_layer_data *data)
 {
-	return do_single_layer(xc, xdev, xsc, data);
+	struct comp_base *cb = comp_base(xc);
+	return comp_layer_accum_equirect2(&cb->layer_accum, xsc, data);
 }
 
 static xrt_result_t
 base_wait_frame(struct xrt_compositor *xc,
                 int64_t *out_frame_id,
-                uint64_t *out_predicted_display_time_ns,
-                uint64_t *out_predicted_display_period_ns)
+                int64_t *out_predicted_display_time_ns,
+                int64_t *out_predicted_display_period_ns)
 {
 	COMP_TRACE_MARKER();
 
 	struct comp_base *cb = comp_base(xc);
 
 	int64_t frame_id = -1;
-	uint64_t wake_up_time_ns = 0;
-	uint64_t predicted_gpu_time_ns = 0;
+	int64_t wake_up_time_ns = 0;
+	int64_t predicted_gpu_time_ns = 0;
 
 	xrt_comp_predict_frame(               //
 	    xc,                               //
@@ -229,7 +195,7 @@ base_wait_frame(struct xrt_compositor *xc,
 	// Wait until the given wake up time.
 	u_wait_until(&cb->sleeper, wake_up_time_ns);
 
-	uint64_t now_ns = os_monotonic_get_ns();
+	int64_t now_ns = os_monotonic_get_ns();
 
 	// Signal that we woke up.
 	xrt_comp_mark_frame(xc, frame_id, XRT_COMPOSITOR_FRAME_POINT_WOKE, now_ns);
@@ -249,20 +215,21 @@ base_wait_frame(struct xrt_compositor *xc,
 void
 comp_base_init(struct comp_base *cb)
 {
-	cb->base.base.get_swapchain_create_properties = base_get_swapchain_create_properties;
-	cb->base.base.create_swapchain = base_create_swapchain;
-	cb->base.base.import_swapchain = base_import_swapchain;
-	cb->base.base.create_semaphore = base_create_semaphore;
-	cb->base.base.import_fence = base_import_fence;
-	cb->base.base.layer_begin = base_layer_begin;
-	cb->base.base.layer_projection = base_layer_projection;
-	cb->base.base.layer_projection_depth = base_layer_projection_depth;
-	cb->base.base.layer_quad = base_layer_quad;
-	cb->base.base.layer_cube = base_layer_cube;
-	cb->base.base.layer_cylinder = base_layer_cylinder;
-	cb->base.base.layer_equirect1 = base_layer_equirect1;
-	cb->base.base.layer_equirect2 = base_layer_equirect2;
-	cb->base.base.wait_frame = base_wait_frame;
+	struct xrt_compositor *iface = &cb->base.base;
+	iface->get_swapchain_create_properties = base_get_swapchain_create_properties;
+	iface->create_swapchain = base_create_swapchain;
+	iface->import_swapchain = base_import_swapchain;
+	iface->create_semaphore = base_create_semaphore;
+	iface->import_fence = base_import_fence;
+	iface->layer_begin = base_layer_begin;
+	iface->layer_projection = base_layer_projection;
+	iface->layer_projection_depth = base_layer_projection_depth;
+	iface->layer_quad = base_layer_quad;
+	iface->layer_cube = base_layer_cube;
+	iface->layer_cylinder = base_layer_cylinder;
+	iface->layer_equirect1 = base_layer_equirect1;
+	iface->layer_equirect2 = base_layer_equirect2;
+	iface->wait_frame = base_wait_frame;
 
 	u_threading_stack_init(&cb->cscs.destroy_swapchains);
 

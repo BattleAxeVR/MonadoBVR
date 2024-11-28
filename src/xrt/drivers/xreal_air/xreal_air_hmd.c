@@ -558,7 +558,7 @@ handle_sensor_msg(struct xreal_air_hmd *hmd, unsigned char *buffer, int size)
 	// If this is larger then one second something bad is going on.
 	if (hmd->fusion.state != M_IMU_3DOF_STATE_START &&
 	    inter_sample_duration_ns >= (time_duration_ns)U_TIME_1S_IN_NS) {
-		XREAL_AIR_ERROR(hmd, "Drop packet (sensor too slow): %lu", inter_sample_duration_ns);
+		XREAL_AIR_ERROR(hmd, "Drop packet (sensor too slow): %" PRId64, inter_sample_duration_ns);
 		return;
 	}
 
@@ -1031,7 +1031,7 @@ adjust_display_mode(struct xreal_air_hmd *hmd)
  *
  */
 
-static void
+static xrt_result_t
 xreal_air_hmd_update_inputs(struct xrt_device *xdev)
 {
 	struct xreal_air_hmd *hmd = xreal_air_hmd(xdev);
@@ -1045,19 +1045,21 @@ xreal_air_hmd_update_inputs(struct xrt_device *xdev)
 	adjust_display_mode(hmd);
 
 	os_mutex_unlock(&hmd->device_mutex);
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 xreal_air_hmd_get_tracked_pose(struct xrt_device *xdev,
                                enum xrt_input_name name,
-                               uint64_t at_timestamp_ns,
+                               int64_t at_timestamp_ns,
                                struct xrt_space_relation *out_relation)
 {
 	struct xreal_air_hmd *hmd = xreal_air_hmd(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
-		XREAL_AIR_ERROR(hmd, "unknown input name");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&hmd->base, hmd->log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	const enum xrt_space_relation_flags flags = (enum xrt_space_relation_flags)(
@@ -1074,6 +1076,7 @@ xreal_air_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	// Make sure that the orientation is valid.
 	math_quat_normalize(&out_relation->pose.orientation);
+	return XRT_SUCCESS;
 }
 
 static void

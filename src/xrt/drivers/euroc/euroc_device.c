@@ -102,10 +102,10 @@ euroc_device(struct xrt_device *xdev)
 	return (struct euroc_device *)xdev;
 }
 
-static void
+static xrt_result_t
 euroc_device_get_tracked_pose(struct xrt_device *xdev,
                               enum xrt_input_name name,
-                              uint64_t at_timestamp_ns,
+                              int64_t at_timestamp_ns,
                               struct xrt_space_relation *out_relation)
 {
 	struct euroc_device *ed = euroc_device(xdev);
@@ -128,6 +128,8 @@ euroc_device_get_tracked_pose(struct xrt_device *xdev,
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -196,7 +198,6 @@ euroc_device_create(struct xrt_prober *xp)
 
 	xd->tracking_origin = &ed->tracking_origin;
 	xd->tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
-	xd->tracking_origin->offset.orientation.w = 1.0f;
 	snprintf(xd->tracking_origin->name, XRT_TRACKING_NAME_LEN, "%s %s", dev_name, "SLAM Tracker");
 
 	if (is_hmd) {
@@ -217,7 +218,7 @@ euroc_device_create(struct xrt_prober *xp)
 	u_var_add_root(ed, dev_name, false);
 	u_var_add_pose(ed, &ed->pose, "pose");
 	u_var_add_pose(ed, &ed->offset, "offset");
-	u_var_add_pose(ed, &ed->tracking_origin.offset, "tracking offset");
+	u_var_add_pose(ed, &ed->tracking_origin.initial_offset, "tracking offset");
 
 	bool tracked = xp->tracking->create_tracked_slam(xp->tracking, &ed->slam) >= 0;
 	if (!tracked) {

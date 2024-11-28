@@ -20,7 +20,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
-#include <inttypes.h>
 
 #include "math/m_api.h"
 #include "math/m_space.h"
@@ -443,7 +442,7 @@ rift_s_update_input_vec2(struct rift_s_controller *ctrl, int index, int64_t when
 	ctrl->base.inputs[index].value.vec2.y = y;
 }
 
-static void
+static xrt_result_t
 rift_s_controller_update_inputs(struct xrt_device *xdev)
 {
 	struct rift_s_controller *ctrl = (struct rift_s_controller *)(xdev);
@@ -505,8 +504,9 @@ rift_s_controller_update_inputs(struct xrt_device *xdev)
 	/* FIXME: Output touch detections:
 	      OCULUS_TOUCH_THUMBREST_TOUCH, - does Rift S have a thumbrest?
 	*/
-
 	os_mutex_unlock(&ctrl->mutex);
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -518,7 +518,7 @@ rift_s_controller_set_output(struct xrt_device *xdev, enum xrt_output_name name,
 static void
 rift_s_controller_get_fusion_pose(struct rift_s_controller *ctrl,
                                   enum xrt_input_name name,
-                                  uint64_t at_timestamp_ns,
+                                  int64_t at_timestamp_ns,
                                   struct xrt_space_relation *out_relation)
 {
 	out_relation->pose = ctrl->pose;
@@ -539,17 +539,17 @@ rift_s_controller_get_fusion_pose(struct rift_s_controller *ctrl,
 	    XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 }
 
-static void
+static xrt_result_t
 rift_s_controller_get_tracked_pose(struct xrt_device *xdev,
                                    enum xrt_input_name name,
-                                   uint64_t at_timestamp_ns,
+                                   int64_t at_timestamp_ns,
                                    struct xrt_space_relation *out_relation)
 {
 	struct rift_s_controller *ctrl = (struct rift_s_controller *)(xdev);
 
 	if (name != XRT_INPUT_TOUCH_AIM_POSE && name != XRT_INPUT_TOUCH_GRIP_POSE) {
-		RIFT_S_ERROR("unknown pose name requested");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&ctrl->base, rift_s_log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	struct xrt_relation_chain xrc = {0};
@@ -571,6 +571,8 @@ rift_s_controller_get_tracked_pose(struct xrt_device *xdev,
 	os_mutex_unlock(&ctrl->mutex);
 
 	m_relation_chain_resolve(&xrc, out_relation);
+
+	return XRT_SUCCESS;
 }
 
 static void

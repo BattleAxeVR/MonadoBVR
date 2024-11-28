@@ -123,7 +123,7 @@ vive_controller_device(struct xrt_device *xdev)
 static inline void
 get_pose(struct vive_controller_device *d,
          enum xrt_input_name name,
-         uint64_t at_timestamp_ns,
+         int64_t at_timestamp_ns,
          struct xrt_space_relation *out_relation)
 {
 	struct xrt_space_relation imu_relation = {0};
@@ -183,7 +183,7 @@ vive_controller_device_destroy(struct xrt_device *xdev)
 	free(d);
 }
 
-static void
+static xrt_result_t
 vive_controller_device_wand_update_inputs(struct xrt_device *xdev)
 {
 	struct vive_controller_device *d = vive_controller_device(xdev);
@@ -240,9 +240,11 @@ vive_controller_device_wand_update_inputs(struct xrt_device *xdev)
 	VIVE_TRACE(d, "Trigger: %f", d->state.trigger);
 
 	os_mutex_unlock(&d->lock);
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 vive_controller_device_index_update_inputs(struct xrt_device *xdev)
 {
 	XRT_TRACE_MARKER();
@@ -358,14 +360,16 @@ vive_controller_device_index_update_inputs(struct xrt_device *xdev)
 	}
 
 	os_mutex_unlock(&d->lock);
+
+	return XRT_SUCCESS;
 }
 
 static void
 vive_controller_get_hand_tracking(struct xrt_device *xdev,
                                   enum xrt_input_name name,
-                                  uint64_t requested_timestamp_ns,
+                                  int64_t requested_timestamp_ns,
                                   struct xrt_hand_joint_set *out_value,
-                                  uint64_t *out_timestamp_ns)
+                                  int64_t *out_timestamp_ns)
 {
 	XRT_TRACE_MARKER();
 
@@ -406,10 +410,10 @@ vive_controller_get_hand_tracking(struct xrt_device *xdev,
 	out_value->is_active = true;
 }
 
-static void
+static xrt_result_t
 vive_controller_device_get_tracked_pose(struct xrt_device *xdev,
                                         enum xrt_input_name name,
-                                        uint64_t at_timestamp_ns,
+                                        int64_t at_timestamp_ns,
                                         struct xrt_space_relation *out_relation)
 {
 	struct vive_controller_device *d = vive_controller_device(xdev);
@@ -417,11 +421,13 @@ vive_controller_device_get_tracked_pose(struct xrt_device *xdev,
 	// U_LOG_D("input name %d %d", name, XRT_INPUT_VIVE_GRIP_POSE);
 	if (name != XRT_INPUT_VIVE_AIM_POSE && name != XRT_INPUT_VIVE_GRIP_POSE && name != XRT_INPUT_INDEX_AIM_POSE &&
 	    name != XRT_INPUT_INDEX_GRIP_POSE) {
-		VIVE_ERROR(d, "unknown input name");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&d->base, d->log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	get_pose(d, name, at_timestamp_ns, out_relation);
+
+	return XRT_SUCCESS;
 }
 
 static int
@@ -731,7 +737,7 @@ vive_controller_decode_watchmanv1(struct vive_controller_device *d, struct vive_
 	}
 
 	if (buf > end)
-		VIVE_ERROR(d, "overshoot: %ld\n", buf - end);
+		VIVE_ERROR(d, "overshoot: %td\n", (ptrdiff_t)(buf - end));
 
 	if (buf < end)
 		vive_controller_handle_lighthousev1(d, buf, end - buf);
@@ -899,10 +905,11 @@ vive_controller_decode_watchmanv2(struct vive_controller_device *d, struct vive_
 #endif
 
 	if (buf < end) {
-		VIVE_TRACE(d, "%ld bytes unparsed data in message\n", message->len - (buf - message->payload) - 1);
+		VIVE_TRACE(d, "%td bytes unparsed data in message\n",
+		           (ptrdiff_t)(message->len - (buf - message->payload) - 1));
 	}
 	if (buf > end)
-		VIVE_ERROR(d, "overshoot: %ld\n", buf - end);
+		VIVE_ERROR(d, "overshoot: %td\n", (ptrdiff_t)(buf - end));
 
 	//! @todo: Parse lighthouse v2 data
 }

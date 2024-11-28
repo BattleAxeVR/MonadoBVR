@@ -340,7 +340,7 @@
 /*
  * XR_EXT_hand_tracking
  */
-#if defined(XR_EXT_hand_tracking)
+#if defined(XR_EXT_hand_tracking) && defined(XRT_FEATURE_OPENXR_HAND_TRACKING_EXT)
 #define OXR_HAVE_EXT_hand_tracking
 #define OXR_EXTENSION_SUPPORT_EXT_hand_tracking(_) _(EXT_hand_tracking, EXT_HAND_TRACKING)
 #else
@@ -476,6 +476,17 @@
 
 
 /*
+ * XR_FB_face_tracking2
+ */
+#if defined(XR_FB_face_tracking2) && defined(XRT_FEATURE_OPENXR_FACE_TRACKING2_FB)
+#define OXR_HAVE_FB_face_tracking2
+#define OXR_EXTENSION_SUPPORT_FB_face_tracking2(_) _(FB_face_tracking2, FB_FACE_TRACKING2)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_face_tracking2(_)
+#endif
+
+
+/*
  * XR_FB_display_refresh_rate
  */
 #if defined(XR_FB_display_refresh_rate) && defined(XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE)
@@ -489,7 +500,7 @@
 /*
  * XR_FB_passthrough
  */
-#if defined(XR_FB_passthrough) && defined(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+#if defined(XR_FB_passthrough) && defined(XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH)
 #define OXR_HAVE_FB_passthrough
 #define OXR_EXTENSION_SUPPORT_FB_passthrough(_) _(FB_passthrough, FB_PASSTHROUGH)
 #else
@@ -788,6 +799,7 @@
     OXR_EXTENSION_SUPPORT_FB_composition_layer_image_layout(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_settings(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_depth_test(_) \
+    OXR_EXTENSION_SUPPORT_FB_face_tracking2(_) \
     OXR_EXTENSION_SUPPORT_FB_display_refresh_rate(_) \
     OXR_EXTENSION_SUPPORT_FB_passthrough(_) \
     OXR_EXTENSION_SUPPORT_FB_touch_controller_pro(_) \

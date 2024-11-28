@@ -34,7 +34,7 @@
 DEBUG_GET_ONCE_OPTION(euroc_path, "EUROC_PATH", NULL)
 #endif
 
-#ifdef XRT_BUILD_DRIVER_REALSENSE
+#if defined(XRT_HAVE_OPENCV) && defined(XRT_BUILD_DRIVER_REALSENSE)
 #include "util/u_debug.h"
 DEBUG_GET_ONCE_NUM_OPTION(rs_source_index, "RS_SOURCE_INDEX", -1)
 #endif
@@ -421,15 +421,15 @@ p_tracking_init(struct prober *p)
 	fact->base.create_tracked_psvr = p_factory_create_tracked_psvr;
 	fact->base.create_tracked_slam = p_factory_create_tracked_slam;
 	fact->origin.type = XRT_TRACKING_TYPE_RGB;
-	fact->origin.offset.orientation.y = 1.0f;
-	fact->origin.offset.position.z = -2.0f;
-	fact->origin.offset.position.y = 1.0f;
+	fact->origin.initial_offset.orientation.y = 1.0f;
+	fact->origin.initial_offset.position.z = -2.0f;
+	fact->origin.initial_offset.position.y = 1.0f;
 	fact->p = p;
 
 	snprintf(fact->origin.name, sizeof(fact->origin.name), "PSVR & PSMV tracking");
 
 	u_var_add_root(fact, "Tracking Factory", false);
-	u_var_add_pose(fact, &fact->origin.offset, "offset");
+	u_var_add_pose(fact, &fact->origin.initial_offset, "offset");
 
 	// Finally set us as the tracking factory.
 	p->base.tracking = &fact->base;

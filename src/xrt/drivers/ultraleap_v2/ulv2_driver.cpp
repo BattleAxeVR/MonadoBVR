@@ -76,7 +76,7 @@ ulv2_device(struct xrt_device *xdev)
 }
 
 
-// Roughly, take the Leap hand joint, do some coordinate conversions, and save it in a xrt_hand_joint_value
+// Roughly, take the Leap hand joint, do some coordinate conversions, and save it in an xrt_hand_joint_value
 static void
 ulv2_process_joint(
     Leap::Vector jointpos, Leap::Matrix jointbasis, float width, int side, struct xrt_hand_joint_value *joint)
@@ -387,7 +387,7 @@ ulv2_create_device(struct xrt_device **out_xdev)
 	ulv2d->base.tracking_origin = &ulv2d->tracking_origin;
 	ulv2d->base.tracking_origin->type = XRT_TRACKING_TYPE_OTHER;
 
-	math_pose_identity(&ulv2d->base.tracking_origin->offset);
+	math_pose_identity(&ulv2d->base.tracking_origin->initial_offset);
 
 	ulv2d->log_level = debug_get_log_option_ulv2_log();
 

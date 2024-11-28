@@ -6,9 +6,11 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Christoph Haag <christoph.haag@collabora.com>
  * @author Fernando Velazquez Innella <finnella@magicleap.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup comp_main
  */
 
+#include "util/comp_layer_accum.h"
 #include "xrt/xrt_compositor.h"
 
 #include "os/os_time.h"
@@ -34,9 +36,25 @@
  *
  */
 
+static inline const struct comp_swapchain_image *
+get_layer_image(const struct comp_layer *layer, uint32_t swapchain_index, uint32_t image_index)
+{
+
+	const struct comp_swapchain *sc = (struct comp_swapchain *)(comp_layer_get_swapchain(layer, swapchain_index));
+	return &sc->images[image_index];
+}
+
+static inline const struct comp_swapchain_image *
+get_layer_depth_image(const struct comp_layer *layer, uint32_t swapchain_index, uint32_t image_index)
+{
+
+	const struct comp_swapchain *sc =
+	    (struct comp_swapchain *)(comp_layer_get_depth_swapchain(layer, swapchain_index));
+	return &sc->images[image_index];
+}
+
 static inline void
-do_cs_equirect2_layer(const struct xrt_layer_data *data,
-                      const struct comp_layer *layer,
+do_cs_equirect2_layer(const struct comp_layer *layer,
                       const struct xrt_matrix_4x4 *eye_view_mat,
                       const struct xrt_matrix_4x4 *world_view_mat,
                       uint32_t view_index,
@@ -49,18 +67,18 @@ do_cs_equirect2_layer(const struct xrt_layer_data *data,
                       struct render_compute_layer_ubo_data *ubo_data,
                       uint32_t *out_cur_image)
 {
-	const struct xrt_layer_equirect2_data *eq2 = &data->equirect2;
-
-	const struct comp_swapchain_image *image = &layer->sc_array[0]->images[eq2->sub.image_index];
-	uint32_t array_index = eq2->sub.array_index;
+	const struct xrt_layer_data *layer_data = &layer->data;
+	const struct xrt_layer_equirect2_data *eq2 = &layer_data->equirect2;
+	const uint32_t array_index = eq2->sub.array_index;
+	const struct comp_swapchain_image *image = get_layer_image(layer, 0, eq2->sub.image_index);
 
 	// Image to use.
 	src_samplers[cur_image] = clamp_to_edge;
-	src_image_views[cur_image] = get_image_view(image, data->flags, array_index);
+	src_image_views[cur_image] = get_image_view(image, layer_data->flags, array_index);
 
 	// Used for Subimage and OpenGL flip.
 	set_post_transform_rect(                    //
-	    data,                                   // data
+	    layer_data,                             // data
 	    &eq2->sub.norm_rect,                    // src_norm_rect
 	    false,                                  // invert_flip
 	    &ubo_data->post_transforms[cur_layer]); // out_norm_rect
@@ -73,7 +91,7 @@ do_cs_equirect2_layer(const struct xrt_layer_data *data,
 	struct xrt_matrix_4x4 model_inv;
 	math_matrix_4x4_inverse(&model, &model_inv);
 
-	const struct xrt_matrix_4x4 *v = is_layer_view_space(data) ? eye_view_mat : world_view_mat;
+	const struct xrt_matrix_4x4 *v = is_layer_view_space(layer_data) ? eye_view_mat : world_view_mat;
 
 	struct xrt_matrix_4x4 v_inv;
 	math_matrix_4x4_inverse(v, &v_inv);
@@ -98,8 +116,7 @@ do_cs_equirect2_layer(const struct xrt_layer_data *data,
 }
 
 static inline void
-do_cs_projection_layer(const struct xrt_layer_data *data,
-                       const struct comp_layer *layer,
+do_cs_projection_layer(const struct comp_layer *layer,
                        const struct xrt_pose *world_pose,
                        uint32_t view_index,
                        uint32_t cur_layer,
@@ -112,37 +129,38 @@ do_cs_projection_layer(const struct xrt_layer_data *data,
                        bool do_timewarp,
                        uint32_t *out_cur_image)
 {
+	const struct xrt_layer_data *layer_data = &layer->data;
 	const struct xrt_layer_projection_view_data *vd = NULL;
 	const struct xrt_layer_depth_data *dvd = NULL;
 
-	if (data->type == XRT_LAYER_PROJECTION) {
-		view_index_to_projection_data(view_index, data, &vd);
+	if (layer_data->type == XRT_LAYER_PROJECTION) {
+		view_index_to_projection_data(view_index, layer_data, &vd);
 	} else {
-		view_index_to_depth_data(view_index, data, &vd, &dvd);
+		view_index_to_depth_data(view_index, layer_data, &vd, &dvd);
 	}
 
 	uint32_t sc_array_index = is_view_index_right(view_index) ? 1 : 0;
 	uint32_t array_index = vd->sub.array_index;
-	const struct comp_swapchain_image *image = &layer->sc_array[sc_array_index]->images[vd->sub.image_index];
+	const struct comp_swapchain_image *image = get_layer_image(layer, sc_array_index, vd->sub.image_index);
 
 	// Color
 	src_samplers[cur_image] = clamp_to_border_black;
-	src_image_views[cur_image] = get_image_view(image, data->flags, array_index);
+	src_image_views[cur_image] = get_image_view(image, layer_data->flags, array_index);
 	ubo_data->images_samplers[cur_layer + 0].images[0] = cur_image++;
 
 	// Depth
-	if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+	if (layer_data->type == XRT_LAYER_PROJECTION_DEPTH) {
 		uint32_t d_array_index = dvd->sub.array_index;
 		const struct comp_swapchain_image *d_image =
-		    &layer->sc_array[sc_array_index + 2]->images[dvd->sub.image_index];
+		    get_layer_depth_image(layer, sc_array_index, dvd->sub.image_index);
 
 		src_samplers[cur_image] = clamp_to_edge; // Edge to keep depth stable at edges.
-		src_image_views[cur_image] = get_image_view(d_image, data->flags, d_array_index);
+		src_image_views[cur_image] = get_image_view(d_image, layer_data->flags, d_array_index);
 		ubo_data->images_samplers[cur_layer + 0].images[1] = cur_image++;
 	}
 
 	set_post_transform_rect(                    //
-	    data,                                   // data
+	    layer_data,                             // data
 	    &vd->sub.norm_rect,                     // src_norm_rect
 	    false,                                  // invert_flip
 	    &ubo_data->post_transforms[cur_layer]); // out_norm_rect
@@ -160,8 +178,7 @@ do_cs_projection_layer(const struct xrt_layer_data *data,
 }
 
 static inline void
-do_cs_quad_layer(const struct xrt_layer_data *data,
-                 const struct comp_layer *layer,
+do_cs_quad_layer(const struct comp_layer *layer,
                  const struct xrt_matrix_4x4 *eye_view_mat,
                  const struct xrt_matrix_4x4 *world_view_mat,
                  uint32_t view_index,
@@ -174,35 +191,35 @@ do_cs_quad_layer(const struct xrt_layer_data *data,
                  struct render_compute_layer_ubo_data *ubo_data,
                  uint32_t *out_cur_image)
 {
-	const struct xrt_layer_quad_data *q = &data->quad;
-
-	const struct comp_swapchain_image *image = &layer->sc_array[0]->images[q->sub.image_index];
-	uint32_t array_index = q->sub.array_index;
+	const struct xrt_layer_data *layer_data = &layer->data;
+	const struct xrt_layer_quad_data *q = &layer_data->quad;
+	const uint32_t array_index = q->sub.array_index;
+	const struct comp_swapchain_image *image = get_layer_image(layer, 0, q->sub.image_index);
 
 	// Image to use.
 	src_samplers[cur_image] = clamp_to_edge;
-	src_image_views[cur_image] = get_image_view(image, data->flags, array_index);
+	src_image_views[cur_image] = get_image_view(image, layer_data->flags, array_index);
 
 	// Set the normalized post transform values.
 	struct xrt_normalized_rect post_transform = XRT_STRUCT_INIT;
 	set_post_transform_rect( //
-	    data,                // data
+	    layer_data,          // data
 	    &q->sub.norm_rect,   // src_norm_rect
 	    true,                // invert_flip
 	    &post_transform);    // out_norm_rect
 
 	// Is this layer viewspace or not.
-	const struct xrt_matrix_4x4 *view_mat = is_layer_view_space(data) ? eye_view_mat : world_view_mat;
+	const struct xrt_matrix_4x4 *view_mat = is_layer_view_space(layer_data) ? eye_view_mat : world_view_mat;
 
 	// Transform quad pose into view space.
 	struct xrt_vec3 quad_position = XRT_STRUCT_INIT;
-	math_matrix_4x4_transform_vec3(view_mat, &data->quad.pose.position, &quad_position);
+	math_matrix_4x4_transform_vec3(view_mat, &layer_data->quad.pose.position, &quad_position);
 
 	// neutral quad layer faces +z, towards the user
 	struct xrt_vec3 normal = (struct xrt_vec3){.x = 0, .y = 0, .z = 1};
 
 	// rotation of the quad normal in world space
-	struct xrt_quat rotation = data->quad.pose.orientation;
+	struct xrt_quat rotation = layer_data->quad.pose.orientation;
 	math_quat_rotate_vec3(&rotation, &normal, &normal);
 
 	/*
@@ -219,19 +236,19 @@ do_cs_quad_layer(const struct xrt_layer_data *data,
 	 * normal_view_space = combined_normal [in view space] - plane_origin [in view space]
 	 */
 	struct xrt_vec3 normal_view_space = normal;
-	math_vec3_accum(&data->quad.pose.position, &normal_view_space);
+	math_vec3_accum(&layer_data->quad.pose.position, &normal_view_space);
 	math_matrix_4x4_transform_vec3(view_mat, &normal_view_space, &normal_view_space);
 	math_vec3_subtract(&quad_position, &normal_view_space);
 
 	struct xrt_vec3 scale = {1.f, 1.f, 1.f};
 	struct xrt_matrix_4x4 plane_transform_view_space, inverse_quad_transform;
-	math_matrix_4x4_model(&data->quad.pose, &scale, &plane_transform_view_space);
+	math_matrix_4x4_model(&layer_data->quad.pose, &scale, &plane_transform_view_space);
 	math_matrix_4x4_multiply(view_mat, &plane_transform_view_space, &plane_transform_view_space);
 	math_matrix_4x4_inverse(&plane_transform_view_space, &inverse_quad_transform);
 
 	// Write all of the UBO data.
 	ubo_data->post_transforms[cur_layer] = post_transform;
-	ubo_data->quad_extent[cur_layer].val = data->quad.size;
+	ubo_data->quad_extent[cur_layer].val = layer_data->quad.size;
 	ubo_data->quad_position[cur_layer].val = quad_position;
 	ubo_data->quad_normal[cur_layer].val = normal_view_space;
 	ubo_data->inverse_quad_transform[cur_layer] = inverse_quad_transform;
@@ -243,8 +260,7 @@ do_cs_quad_layer(const struct xrt_layer_data *data,
 
 
 static inline void
-do_cs_cylinder_layer(const struct xrt_layer_data *data,
-                     const struct comp_layer *layer,
+do_cs_cylinder_layer(const struct comp_layer *layer,
                      const struct xrt_matrix_4x4 *eye_view_mat,
                      const struct xrt_matrix_4x4 *world_view_mat,
                      uint32_t view_index,
@@ -257,18 +273,18 @@ do_cs_cylinder_layer(const struct xrt_layer_data *data,
                      struct render_compute_layer_ubo_data *ubo_data,
                      uint32_t *out_cur_image)
 {
-	const struct xrt_layer_cylinder_data *c = &data->cylinder;
-
-	const struct comp_swapchain_image *image = &layer->sc_array[0]->images[c->sub.image_index];
-	uint32_t array_index = c->sub.array_index;
+	const struct xrt_layer_data *layer_data = &layer->data;
+	const struct xrt_layer_cylinder_data *c = &layer_data->cylinder;
+	const uint32_t array_index = c->sub.array_index;
+	const struct comp_swapchain_image *image = get_layer_image(layer, 0, c->sub.image_index);
 
 	// Image to use.
 	src_samplers[cur_image] = clamp_to_edge;
-	src_image_views[cur_image] = get_image_view(image, data->flags, array_index);
+	src_image_views[cur_image] = get_image_view(image, layer_data->flags, array_index);
 
 	// Used for Subimage and OpenGL flip.
 	set_post_transform_rect(                    //
-	    data,                                   // data
+	    layer_data,                             // data
 	    &c->sub.norm_rect,                      // src_norm_rect
 	    false,                                  // invert_flip
 	    &ubo_data->post_transforms[cur_layer]); // out_norm_rect
@@ -284,7 +300,7 @@ do_cs_cylinder_layer(const struct xrt_layer_data *data,
 	struct xrt_matrix_4x4 model_inv;
 	math_matrix_4x4_inverse(&model, &model_inv);
 
-	const struct xrt_matrix_4x4 *v = is_layer_view_space(data) ? eye_view_mat : world_view_mat;
+	const struct xrt_matrix_4x4 *v = is_layer_view_space(layer_data) ? eye_view_mat : world_view_mat;
 
 	struct xrt_matrix_4x4 v_inv;
 	math_matrix_4x4_inverse(v, &v_inv);
@@ -413,7 +429,7 @@ do_cs_distortion_for_layer(struct render_compute *crc,
 		struct xrt_normalized_rect src_norm_rect;
 		VkImageView src_image_view;
 		uint32_t array_index = vds[i]->sub.array_index;
-		const struct comp_swapchain_image *image = &layer->sc_array[i]->images[vds[i]->sub.image_index];
+		const struct comp_swapchain_image *image = get_layer_image(layer, i, vds[i]->sub.image_index);
 
 		// Gather data.
 		world_pose = d->views[i].world_pose;
@@ -425,8 +441,8 @@ do_cs_distortion_for_layer(struct render_compute *crc,
 		src_image_view = get_image_view(image, data->flags, array_index);
 
 		if (data->flip_y) {
+			src_norm_rect.y += src_norm_rect.h;
 			src_norm_rect.h = -src_norm_rect.h;
-			src_norm_rect.y = 1 + src_norm_rect.y;
 		}
 
 		// Fill in data.
@@ -540,7 +556,6 @@ comp_render_cs_layer(struct render_compute *crc,
 		switch (data->type) {
 		case XRT_LAYER_CYLINDER:
 			do_cs_cylinder_layer(      //
-			    data,                  // data
 			    layer,                 // layer
 			    &eye_view_mat,         // eye_view_mat
 			    &world_view_mat,       // world_view_mat
@@ -556,7 +571,6 @@ comp_render_cs_layer(struct render_compute *crc,
 			break;
 		case XRT_LAYER_EQUIRECT2:
 			do_cs_equirect2_layer(     //
-			    data,                  // data
 			    layer,                 // layer
 			    &eye_view_mat,         // eye_view_mat
 			    &world_view_mat,       // world_view_mat
@@ -573,7 +587,6 @@ comp_render_cs_layer(struct render_compute *crc,
 		case XRT_LAYER_PROJECTION_DEPTH:
 		case XRT_LAYER_PROJECTION: {
 			do_cs_projection_layer(    //
-			    data,                  // data
 			    layer,                 // layer
 			    world_pose,            // world_pose
 			    view_index,            // view_index
@@ -589,7 +602,6 @@ comp_render_cs_layer(struct render_compute *crc,
 		} break;
 		case XRT_LAYER_QUAD: {
 			do_cs_quad_layer(          //
-			    data,                  // data
 			    layer,                 // layer
 			    &eye_view_mat,         // eye_view_mat
 			    &world_view_mat,       // world_view_mat

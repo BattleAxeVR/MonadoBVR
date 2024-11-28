@@ -11,13 +11,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
 
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 
+#include "oxr_frame_sync.h"
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_two_call.h"
@@ -100,7 +100,8 @@ oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 		OXR_VERIFY_VIEW_CONFIG_TYPE(&log, sess->sys->inst, beginInfo->primaryViewConfigurationType);
 	}
 
-	if (sess->has_begun) {
+	// Going to effectively double check this, but this gives us an early out.
+	if (oxr_frame_sync_is_session_running(&sess->frame_sync)) {
 		return oxr_error(&log, XR_ERROR_SESSION_RUNNING, "Session is already running");
 	}
 
@@ -175,6 +176,21 @@ oxr_xrEndFrame(XrSession session, const XrFrameEndInfo *frameEndInfo)
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_SESSION_RUNNING(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, frameEndInfo, XR_TYPE_FRAME_END_INFO);
+
+	// Get from compositor.
+	struct xrt_system_compositor_info *info = sess->sys->xsysc ? &sess->sys->xsysc->info : NULL;
+
+	// headless extension does not modify the layer count
+	uint32_t max_layers = XRT_MAX_LAYERS;
+	if (info) {
+		max_layers = info->max_layers;
+	}
+
+	if (frameEndInfo->layerCount > max_layers) {
+		return oxr_error(&log, XR_ERROR_LAYER_LIMIT_EXCEEDED, "(layerCount == %u) exceeds limit %u",
+		                 frameEndInfo->layerCount, max_layers);
+	}
+
 
 #ifdef XRT_FEATURE_RENDERDOC
 	if (sess->sys->inst->rdoc_api) {
@@ -384,7 +400,7 @@ oxr_xrThermalGetTemperatureTrendEXT(XrSession session,
  *
  */
 
-#ifdef XR_EXT_hand_tracking
+#ifdef OXR_HAVE_EXT_hand_tracking
 
 static XrResult
 oxr_hand_tracker_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)

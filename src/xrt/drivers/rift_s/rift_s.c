@@ -28,7 +28,6 @@
 #include <stdio.h>
 #include <time.h>
 #include <assert.h>
-#include <inttypes.h>
 
 #include "math/m_api.h"
 #include "math/m_vec3.h"
@@ -158,7 +157,7 @@ rift_s_system_create(struct xrt_prober *xp,
 
 	struct rift_s_system *sys = U_TYPED_CALLOC(struct rift_s_system);
 	sys->base.type = XRT_TRACKING_TYPE_NONE;
-	sys->base.offset.orientation.w = 1.0f;
+	sys->base.initial_offset.orientation.w = 1.0f;
 
 	/* Init refcount */
 	sys->ref.count = 1;

@@ -37,7 +37,6 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
-#include <inttypes.h>
 
 
 /*!
@@ -389,26 +388,27 @@ load_config(struct rs_ddev *rs)
  *
  */
 
-static void
+static xrt_result_t
 rs_ddev_get_tracked_pose(struct xrt_device *xdev,
                          enum xrt_input_name name,
-                         uint64_t at_timestamp_ns,
+                         int64_t at_timestamp_ns,
                          struct xrt_space_relation *out_relation)
 {
 	struct rs_ddev *rs = rs_ddev(xdev);
 
 	if (name != XRT_INPUT_GENERIC_TRACKER_POSE) {
-		U_LOG_E("unknown input name");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&rs->base, u_log_get_global_level(), name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	m_relation_history_get(rs->relation_hist, at_timestamp_ns, out_relation);
+	return XRT_SUCCESS;
 }
 
 static void
 rs_ddev_get_view_poses(struct xrt_device *xdev,
                        const struct xrt_vec3 *default_eye_relation,
-                       uint64_t at_timestamp_ns,
+                       int64_t at_timestamp_ns,
                        uint32_t view_count,
                        struct xrt_space_relation *out_head_relation,
                        struct xrt_fov *out_fovs,
@@ -466,7 +466,6 @@ rs_ddev_create(int device_idx)
 	rs->base.destroy = rs_ddev_destroy;
 	rs->base.name = XRT_DEVICE_REALSENSE;
 	rs->base.tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
-	rs->base.tracking_origin->offset = (struct xrt_pose)XRT_POSE_IDENTITY;
 
 	// Print name.
 	snprintf(rs->base.str, XRT_DEVICE_NAME_LEN, "Intel RealSense Device-SLAM");

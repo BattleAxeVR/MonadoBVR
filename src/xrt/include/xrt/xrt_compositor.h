@@ -408,7 +408,7 @@ struct xrt_layer_data
 	 * The layer may be displayed after this point, but must never be
 	 * displayed before.
 	 */
-	uint64_t timestamp;
+	int64_t timestamp;
 
 	/*!
 	 * Composition flags
@@ -477,7 +477,7 @@ struct xrt_layer_data
 struct xrt_layer_frame_data
 {
 	int64_t frame_id;
-	uint64_t display_time_ns;
+	int64_t display_time_ns;
 	enum xrt_blend_mode env_blend_mode;
 };
 
@@ -589,7 +589,7 @@ struct xrt_swapchain
 	 * @param timeout_ns Timeout in nanoseconds,
 	 * @param index Image index to wait for.
 	 */
-	xrt_result_t (*wait_image)(struct xrt_swapchain *xsc, uint64_t timeout_ns, uint32_t index);
+	xrt_result_t (*wait_image)(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index);
 
 	/*!
 	 * Do any barrier transitions to and from the application.
@@ -686,7 +686,7 @@ xrt_swapchain_dec_image_use(struct xrt_swapchain *xsc, uint32_t index)
  * @public @memberof xrt_swapchain
  */
 static inline xrt_result_t
-xrt_swapchain_wait_image(struct xrt_swapchain *xsc, uint64_t timeout_ns, uint32_t index)
+xrt_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index)
 {
 	return xsc->wait_image(xsc, timeout_ns, index);
 }
@@ -725,7 +725,7 @@ xrt_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
  */
 
 /*!
- * Compositor fence used for syncornization.
+ * Compositor fence used for synchronization.
  */
 struct xrt_compositor_fence
 {
@@ -962,6 +962,7 @@ struct xrt_begin_session_info
 	bool ext_hand_interaction_enabled;
 	bool htc_facial_tracking_enabled;
 	bool fb_body_tracking_enabled;
+	bool fb_face_tracking2_enabled;
 };
 
 /*!
@@ -980,8 +981,8 @@ enum xrt_thread_hint
  *
  * Common compositor client interface/base.
  *
- * A compositor is very much analogous to a `XrSession` but without any of the
- * input functionality, and does have the same life time as a `XrSession`.
+ * A compositor is very much analogous to an `XrSession` but without any of the
+ * input functionality, and does have the same lifetime as an `XrSession`.
  */
 struct xrt_compositor
 {
@@ -1103,10 +1104,10 @@ struct xrt_compositor
 	 */
 	xrt_result_t (*predict_frame)(struct xrt_compositor *xc,
 	                              int64_t *out_frame_id,
-	                              uint64_t *out_wake_time_ns,
-	                              uint64_t *out_predicted_gpu_time_ns,
-	                              uint64_t *out_predicted_display_time_ns,
-	                              uint64_t *out_predicted_display_period_ns);
+	                              int64_t *out_wake_time_ns,
+	                              int64_t *out_predicted_gpu_time_ns,
+	                              int64_t *out_predicted_display_time_ns,
+	                              int64_t *out_predicted_display_period_ns);
 
 	/*!
 	 * This function and @ref predict_frame function calls are a alternative to
@@ -1123,7 +1124,7 @@ struct xrt_compositor
 	xrt_result_t (*mark_frame)(struct xrt_compositor *xc,
 	                           int64_t frame_id,
 	                           enum xrt_compositor_frame_point point,
-	                           uint64_t when_ns);
+	                           int64_t when_ns);
 
 	/*!
 	 * See xrWaitFrame.
@@ -1146,8 +1147,8 @@ struct xrt_compositor
 	 */
 	xrt_result_t (*wait_frame)(struct xrt_compositor *xc,
 	                           int64_t *out_frame_id,
-	                           uint64_t *out_predicted_display_time,
-	                           uint64_t *out_predicted_display_period);
+	                           int64_t *out_predicted_display_time,
+	                           int64_t *out_predicted_display_period);
 
 	/*!
 	 * See xrBeginFrame.
@@ -1206,7 +1207,7 @@ struct xrt_compositor
 	 *
 	 * @param xc          Self pointer
 	 * @param xdev        The device the layer is relative to.
-	 * @param xsc         Swapchain object containing eye RGB data.
+	 * @param xsc         Array of swapchain objects containing eye RGB data.
 	 * @param data        All of the pure data bits (not pointers/handles),
 	 *                    including what parts of the supplied swapchain
 	 *                    objects to use for each view.
@@ -1227,10 +1228,8 @@ struct xrt_compositor
 	 *
 	 * @param xc          Self pointer
 	 * @param xdev        The device the layer is relative to.
-	 * @param l_xsc       Swapchain object containing left eye RGB data.
-	 * @param r_xsc       Swapchain object containing right eye RGB data.
-	 * @param l_d_xsc     Swapchain object containing left eye depth data.
-	 * @param r_d_xsc     Swapchain object containing right eye depth data.
+	 * @param xsc         Array of swapchain objects containing eye RGB data.
+	 * @param d_xsc       Array of swapchain objects containing eye depth data.
 	 * @param data        All of the pure data bits (not pointers/handles),
 	 *                    including what parts of the supplied swapchain
 	 *                    objects to use for each view.
@@ -1343,7 +1342,6 @@ struct xrt_compositor
 	 *
 	 * Only after this call will the compositor actually use the layers.
 	 * @param xc          Self pointer
-	 * @param frame_id    The frame id this commit is for.
 	 * @param xcsem       Semaphore that will be signalled when the app GPU
 	 *                    work has completed.
 	 * @param value       Semaphore value upone completion of GPU work.
@@ -1387,7 +1385,7 @@ struct xrt_compositor
 	                                      enum xrt_perf_set_level level);
 
 	/*!
-	 * @brief Get the extents of the reference space’s bounds rectangle.
+	 * @brief Get the extents of the reference space's bounds rectangle.
 	 */
 	xrt_result_t (*get_reference_bounds_rect)(struct xrt_compositor *xc,
 	                                          enum xrt_reference_space_type reference_space_type,
@@ -1590,10 +1588,10 @@ xrt_comp_end_session(struct xrt_compositor *xc)
 static inline xrt_result_t
 xrt_comp_predict_frame(struct xrt_compositor *xc,
                        int64_t *out_frame_id,
-                       uint64_t *out_wake_time_ns,
-                       uint64_t *out_predicted_gpu_time_ns,
-                       uint64_t *out_predicted_display_time_ns,
-                       uint64_t *out_predicted_display_period_ns)
+                       int64_t *out_wake_time_ns,
+                       int64_t *out_predicted_gpu_time_ns,
+                       int64_t *out_predicted_display_time_ns,
+                       int64_t *out_predicted_display_period_ns)
 {
 	return xc->predict_frame(             //
 	    xc,                               //
@@ -1612,10 +1610,7 @@ xrt_comp_predict_frame(struct xrt_compositor *xc,
  * @public @memberof xrt_compositor
  */
 static inline xrt_result_t
-xrt_comp_mark_frame(struct xrt_compositor *xc,
-                    int64_t frame_id,
-                    enum xrt_compositor_frame_point point,
-                    uint64_t when_ns)
+xrt_comp_mark_frame(struct xrt_compositor *xc, int64_t frame_id, enum xrt_compositor_frame_point point, int64_t when_ns)
 {
 	return xc->mark_frame(xc, frame_id, point, when_ns);
 }
@@ -1630,8 +1625,8 @@ xrt_comp_mark_frame(struct xrt_compositor *xc,
 static inline xrt_result_t
 xrt_comp_wait_frame(struct xrt_compositor *xc,
                     int64_t *out_frame_id,
-                    uint64_t *out_predicted_display_time,
-                    uint64_t *out_predicted_display_period)
+                    int64_t *out_predicted_display_time,
+                    int64_t *out_predicted_display_period)
 {
 	return xc->wait_frame(xc, out_frame_id, out_predicted_display_time, out_predicted_display_period);
 }
@@ -1892,9 +1887,7 @@ xrt_comp_get_reference_bounds_rect(struct xrt_compositor *xc,
                                    struct xrt_vec2 *bounds)
 {
 	if (xc->get_reference_bounds_rect == NULL) {
-		bounds->x = 0.f;
-		bounds->y = 0.f;
-		return XRT_ERROR_COMPOSITOR_FUNCTION_NOT_IMPLEMENTED;
+		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
 
 	return xc->get_reference_bounds_rect(xc, reference_space_type, bounds);
@@ -2167,7 +2160,7 @@ struct xrt_image_native
 	 * If not zero, used for a max memory requirements check when importing
 	 * into Vulkan.
 	 */
-	size_t size;
+	uint64_t size;
 
 	/*!
 	 * Is the image created with a dedicated allocation or not.
@@ -2176,6 +2169,12 @@ struct xrt_image_native
 
 	/*!
 	 * Is the native buffer handle a DXGI handle?
+	 *
+	 * - If true, it is some kind of weird global handle, not reference counted, but
+	 *   widely compatible with various images. Ostensibly deprecated, but works the best
+	 *   on Windows.
+	 * - If false, it's either not Windows, or a reference counted "NT Handle"
+	 *   which has awkward limitations, such as "usually no depth images allowed".
 	 */
 	bool is_dxgi_handle;
 };
@@ -2384,7 +2383,7 @@ struct xrt_multi_compositor_control
 	 */
 	xrt_result_t (*notify_loss_pending)(struct xrt_system_compositor *xsc,
 	                                    struct xrt_compositor *xc,
-	                                    uint64_t loss_time_ns);
+	                                    int64_t loss_time_ns);
 
 	/*!
 	 * Notify this client/session if the compositor lost the ability of rendering.
@@ -2521,7 +2520,7 @@ xrt_syscomp_set_main_app_visibility(struct xrt_system_compositor *xsc, struct xr
  * @public @memberof xrt_system_compositor
  */
 static inline xrt_result_t
-xrt_syscomp_notify_loss_pending(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, uint64_t loss_time_ns)
+xrt_syscomp_notify_loss_pending(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t loss_time_ns)
 {
 	if (xsc->xmcc == NULL) {
 		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;

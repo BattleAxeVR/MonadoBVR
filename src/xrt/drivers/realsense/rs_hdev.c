@@ -273,10 +273,10 @@ rs_hdev_correct_pose_from_basalt(struct xrt_pose pose)
 	return out_relation.pose;
 }
 
-static void
+static xrt_result_t
 rs_hdev_get_tracked_pose(struct xrt_device *xdev,
                          enum xrt_input_name name,
-                         uint64_t at_timestamp_ns,
+                         int64_t at_timestamp_ns,
                          struct xrt_space_relation *out_relation)
 {
 	struct rs_hdev *rh = rs_hdev_from_xdev(xdev);
@@ -305,6 +305,8 @@ rs_hdev_get_tracked_pose(struct xrt_device *xdev,
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+
+	return XRT_SUCCESS;
 }
 
 static void

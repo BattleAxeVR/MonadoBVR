@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,6 +10,7 @@
 
 #include "monado.h"
 
+#include "xrt/xrt_defines.h"
 #include "xrt/xrt_results.h"
 
 #include "util/u_misc.h"
@@ -127,7 +128,7 @@ mnd_root_create(mnd_root_t **out_root)
 	mnd_root_t *r = U_TYPED_CALLOC(mnd_root_t);
 
 	struct xrt_instance_info info = {0};
-	snprintf(info.application_name, sizeof(info.application_name), "%s", "libmonado");
+	snprintf(info.app_info.application_name, sizeof(info.app_info.application_name), "%s", "libmonado");
 
 	xrt_result_t xret = ipc_client_connection_init(&r->ipc_c, U_LOGGING_INFO, &info);
 	if (xret != XRT_SUCCESS) {
@@ -305,9 +306,15 @@ mnd_root_get_device_info_bool(mnd_root_t *root, uint32_t device_index, mnd_prope
 		return MND_ERROR_INVALID_VALUE;
 	}
 
-	PE("Is not a valid boolean property (%u)", prop);
+	const struct ipc_shared_device *shared_device = &root->ipc_c.ism->isdevs[device_index];
 
-	return MND_ERROR_INVALID_PROPERTY;
+	switch (prop) {
+	case MND_PROPERTY_SUPPORTS_POSITION_BOOL: *out_bool = shared_device->position_tracking_supported; break;
+	case MND_PROPERTY_SUPPORTS_ORIENTATION_BOOL: *out_bool = shared_device->orientation_tracking_supported; break;
+	default: PE("Is not a valid boolean property (%u)", prop); return MND_ERROR_INVALID_PROPERTY;
+	}
+
+	return MND_SUCCESS;
 }
 
 mnd_result_t
@@ -337,9 +344,14 @@ mnd_root_get_device_info_u32(mnd_root_t *root, uint32_t device_index, mnd_proper
 		return MND_ERROR_INVALID_VALUE;
 	}
 
-	PE("Is not a valid u32 property (%u)", prop);
+	const struct ipc_shared_device *shared_device = &root->ipc_c.ism->isdevs[device_index];
 
-	return MND_ERROR_INVALID_PROPERTY;
+	switch (prop) {
+	case MND_PROPERTY_TRACKING_ORIGIN_U32: *out_u32 = shared_device->tracking_origin_index; break;
+	default: PE("Is not a valid u32 property (%u)", prop); return MND_ERROR_INVALID_PROPERTY;
+	}
+
+	return MND_SUCCESS;
 }
 
 mnd_result_t
@@ -459,6 +471,117 @@ mnd_root_recenter_local_spaces(mnd_root_t *root)
 	switch (xret) {
 	case XRT_SUCCESS: return MND_SUCCESS;
 	case XRT_ERROR_RECENTERING_NOT_SUPPORTED: return MND_ERROR_RECENTERING_NOT_SUPPORTED;
+	case XRT_ERROR_IPC_FAILURE: PE("Connection error!"); return MND_ERROR_OPERATION_FAILED;
+	default: PE("Internal error, shouldn't get here"); return MND_ERROR_OPERATION_FAILED;
+	}
+}
+
+mnd_result_t
+mnd_root_get_reference_space_offset(mnd_root_t *root, mnd_reference_space_type_t type, mnd_pose_t *out_offset)
+{
+	xrt_result_t xret = ipc_call_space_get_reference_space_offset(&root->ipc_c, (enum xrt_reference_space_type)type,
+	                                                              (struct xrt_pose *)out_offset);
+	switch (xret) {
+	case XRT_SUCCESS: return MND_SUCCESS;
+	case XRT_ERROR_UNSUPPORTED_SPACE_TYPE: return MND_ERROR_INVALID_OPERATION;
+	case XRT_ERROR_IPC_FAILURE: PE("Connection error!"); return MND_ERROR_OPERATION_FAILED;
+	default: PE("Internal error, shouldn't get here"); return MND_ERROR_OPERATION_FAILED;
+	}
+}
+
+mnd_result_t
+mnd_root_set_reference_space_offset(mnd_root_t *root, mnd_reference_space_type_t type, const mnd_pose_t *offset)
+{
+	xrt_result_t xret = ipc_call_space_set_reference_space_offset(&root->ipc_c, (enum xrt_reference_space_type)type,
+	                                                              (struct xrt_pose *)offset);
+	switch (xret) {
+	case XRT_SUCCESS: return MND_SUCCESS;
+	case XRT_ERROR_UNSUPPORTED_SPACE_TYPE: return MND_ERROR_INVALID_OPERATION;
+	case XRT_ERROR_RECENTERING_NOT_SUPPORTED: return MND_ERROR_RECENTERING_NOT_SUPPORTED;
+	case XRT_ERROR_IPC_FAILURE: PE("Connection error!"); return MND_ERROR_OPERATION_FAILED;
+	default: PE("Internal error, shouldn't get here"); return MND_ERROR_OPERATION_FAILED;
+	}
+}
+
+mnd_result_t
+mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_pose_t *out_offset)
+{
+	xrt_result_t xret =
+	    ipc_call_space_get_tracking_origin_offset(&root->ipc_c, origin_id, (struct xrt_pose *)out_offset);
+	switch (xret) {
+	case XRT_SUCCESS: return MND_SUCCESS;
+	case XRT_ERROR_UNSUPPORTED_SPACE_TYPE: return MND_ERROR_INVALID_OPERATION;
+	case XRT_ERROR_IPC_FAILURE: PE("Connection error!"); return MND_ERROR_OPERATION_FAILED;
+	default: PE("Internal error, shouldn't get here"); return MND_ERROR_OPERATION_FAILED;
+	}
+}
+
+mnd_result_t
+mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, const mnd_pose_t *offset)
+{
+	xrt_result_t xret =
+	    ipc_call_space_set_tracking_origin_offset(&root->ipc_c, origin_id, (struct xrt_pose *)offset);
+	switch (xret) {
+	case XRT_SUCCESS: return MND_SUCCESS;
+	case XRT_ERROR_UNSUPPORTED_SPACE_TYPE: return MND_ERROR_INVALID_OPERATION;
+	case XRT_ERROR_IPC_FAILURE: PE("Connection error!"); return MND_ERROR_OPERATION_FAILED;
+	default: PE("Internal error, shouldn't get here"); return MND_ERROR_OPERATION_FAILED;
+	}
+}
+
+mnd_result_t
+mnd_root_get_tracking_origin_count(mnd_root_t *root, uint32_t *out_track_count)
+{
+	CHECK_NOT_NULL(root);
+	CHECK_NOT_NULL(out_track_count);
+
+	*out_track_count = root->ipc_c.ism->itrack_count;
+
+	return MND_SUCCESS;
+}
+
+mnd_result_t
+mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_id, const char **out_string)
+{
+	CHECK_NOT_NULL(root);
+	CHECK_NOT_NULL(out_string);
+
+	if (origin_id >= root->ipc_c.ism->itrack_count) {
+		PE("Invalid itrack index (%u)", origin_id);
+		return MND_ERROR_INVALID_VALUE;
+	}
+
+	const struct ipc_shared_tracking_origin *ipcsto = &root->ipc_c.ism->itracks[origin_id];
+
+	*out_string = ipcsto->name;
+
+	return MND_SUCCESS;
+}
+
+mnd_result_t
+mnd_root_get_device_battery_status(
+    mnd_root_t *root, uint32_t device_index, bool *out_present, bool *out_charging, float *out_charge)
+{
+	CHECK_NOT_NULL(root);
+	CHECK_NOT_NULL(out_present);
+	CHECK_NOT_NULL(out_charging);
+	CHECK_NOT_NULL(out_charge);
+
+	if (device_index >= root->ipc_c.ism->isdev_count) {
+		PE("Invalid device index (%u)", device_index);
+		return MND_ERROR_INVALID_VALUE;
+	}
+
+	const struct ipc_shared_device *shared_device = &root->ipc_c.ism->isdevs[device_index];
+
+	if (!shared_device->battery_status_supported) {
+		return MND_ERROR_OPERATION_FAILED;
+	}
+
+	xrt_result_t xret =
+	    ipc_call_device_get_battery_status(&root->ipc_c, device_index, out_present, out_charging, out_charge);
+	switch (xret) {
+	case XRT_SUCCESS: return MND_SUCCESS;
 	case XRT_ERROR_IPC_FAILURE: PE("Connection error!"); return MND_ERROR_OPERATION_FAILED;
 	default: PE("Internal error, shouldn't get here"); return MND_ERROR_OPERATION_FAILED;
 	}

@@ -131,7 +131,7 @@ static xrt_result_t
 locate_space(struct xrt_space_overseer *xso,
              struct xrt_space *base_space,
              const struct xrt_pose *base_offset,
-             uint64_t at_timestamp_ns,
+             int64_t at_timestamp_ns,
              struct xrt_space *space,
              const struct xrt_pose *offset,
              struct xrt_space_relation *out_relation)
@@ -157,7 +157,7 @@ static xrt_result_t
 locate_spaces(struct xrt_space_overseer *xso,
               struct xrt_space *base_space,
               const struct xrt_pose *base_offset,
-              uint64_t at_timestamp_ns,
+              int64_t at_timestamp_ns,
               struct xrt_space **spaces,
               uint32_t space_count,
               const struct xrt_pose *offsets,
@@ -218,7 +218,7 @@ static xrt_result_t
 locate_device(struct xrt_space_overseer *xso,
               struct xrt_space *base_space,
               const struct xrt_pose *base_offset,
-              uint64_t at_timestamp_ns,
+              int64_t at_timestamp_ns,
               struct xrt_device *xdev,
               struct xrt_space_relation *out_relation)
 {
@@ -282,6 +282,38 @@ recenter_local_spaces(struct xrt_space_overseer *xso)
 	return ipc_call_space_recenter_local_spaces(icspo->ipc_c);
 }
 
+static xrt_result_t
+get_tracking_origin_offset(struct xrt_space_overseer *xso, struct xrt_tracking_origin *xto, struct xrt_pose *out_offset)
+{
+	return XRT_ERROR_NOT_IMPLEMENTED;
+}
+
+static xrt_result_t
+set_tracking_origin_offset(struct xrt_space_overseer *xso,
+                           struct xrt_tracking_origin *xto,
+                           const struct xrt_pose *offset)
+{
+	return XRT_ERROR_NOT_IMPLEMENTED;
+}
+
+static xrt_result_t
+get_reference_space_offset(struct xrt_space_overseer *xso,
+                           enum xrt_reference_space_type type,
+                           struct xrt_pose *out_offset)
+{
+	struct ipc_client_space_overseer *icspo = ipc_client_space_overseer(xso);
+	return ipc_call_space_get_reference_space_offset(icspo->ipc_c, type, out_offset);
+}
+
+static xrt_result_t
+set_reference_space_offset(struct xrt_space_overseer *xso,
+                           enum xrt_reference_space_type type,
+                           const struct xrt_pose *offset)
+{
+	struct ipc_client_space_overseer *icspo = ipc_client_space_overseer(xso);
+	return ipc_call_space_set_reference_space_offset(icspo->ipc_c, type, offset);
+}
+
 static void
 destroy(struct xrt_space_overseer *xso)
 {
@@ -334,6 +366,10 @@ ipc_client_space_overseer_create(struct ipc_connection *ipc_c)
 	icspo->base.ref_space_inc = ref_space_inc;
 	icspo->base.ref_space_dec = ref_space_dec;
 	icspo->base.recenter_local_spaces = recenter_local_spaces;
+	icspo->base.get_tracking_origin_offset = get_tracking_origin_offset;
+	icspo->base.set_tracking_origin_offset = set_tracking_origin_offset;
+	icspo->base.get_reference_space_offset = get_reference_space_offset;
+	icspo->base.set_reference_space_offset = set_reference_space_offset;
 	icspo->base.destroy = destroy;
 	icspo->ipc_c = ipc_c;
 

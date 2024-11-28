@@ -35,7 +35,6 @@ XRT_MAYBE_UNUSED static const char *NV_DIRECT_ALLOWLIST[] = {
     "Valve Corporation Index HMD", // Valve Index
     "Seiko/Epson SEC144A",         // Samsung Odyssey+
     "HPN",                         // Reverb G2
-    "HP Inc.",                     // Also Reverb G2?
     "PNP",                         // NorthStar (Generic)
 };
 
@@ -84,7 +83,7 @@ struct comp_settings
 	bool print_modes;
 
 	//! Nominal frame interval
-	uint64_t nominal_frame_interval_ns;
+	int64_t nominal_frame_interval_ns;
 
 	//! Vulkan physical device selected by comp_settings_check_vulkan_caps
 	//! may be forced by user

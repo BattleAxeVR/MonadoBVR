@@ -25,10 +25,18 @@ struct InputClass;
 
 struct DeviceBuilder
 {
-	std::shared_ptr<Context> ctx;
+	using ContextPtr = std::shared_ptr<Context>;
+	ContextPtr ctx;
 	vr::ITrackedDeviceServerDriver *driver;
 	const char *serial;
 	const std::string &steam_install;
+
+	DeviceBuilder(const ContextPtr &p_ctx,
+	              vr::ITrackedDeviceServerDriver *p_driver,
+	              const char *p_serial,
+	              const std::string &p_stream_install)
+	    : ctx{p_ctx}, driver{p_driver}, serial{p_serial}, steam_install{p_stream_install}
+	{}
 
 	// no copies!
 	DeviceBuilder(const DeviceBuilder &) = delete;
@@ -47,7 +55,7 @@ public:
 	xrt_input *
 	get_input_from_name(std::string_view name);
 
-	void
+	xrt_result_t
 	update_inputs();
 
 	void
@@ -61,8 +69,11 @@ public:
 	handle_properties(const vr::PropertyWrite_t *batch, uint32_t count);
 
 	//! Maps to @ref xrt_device::get_tracked_pose.
-	virtual void
+	virtual xrt_result_t
 	get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation) = 0;
+
+	xrt_result_t
+	get_battery_status(bool *out_present, bool *out_charging, float *out_charge);
 
 protected:
 	Device(const DeviceBuilder &builder);
@@ -72,14 +83,15 @@ protected:
 	std::vector<xrt_input> inputs_vec;
 	inline static xrt_pose chaperone = XRT_POSE_IDENTITY;
 	const InputClass *input_class;
-
+	std::string manufacturer;
+	std::string model;
 	float vsync_to_photon_ns{0.f};
+	bool provides_battery_status{false};
+	bool charging{false};
+	float charge{1.0F};
 
 	virtual void
-	handle_property_write(const vr::PropertyWrite_t &prop) = 0;
-
-	void
-	set_input_class(const InputClass *input_class);
+	handle_property_write(const vr::PropertyWrite_t &prop);
 
 private:
 	vr::ITrackedDeviceServerDriver *driver;
@@ -104,7 +116,7 @@ public:
 
 	HmdDevice(const DeviceBuilder &builder);
 
-	void
+	xrt_result_t
 	get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation) override;
 
 	void
@@ -147,10 +159,6 @@ private:
 
 class ControllerDevice : public Device
 {
-protected:
-	void
-	set_input_class(const InputClass *input_class);
-
 public:
 	ControllerDevice(vr::PropertyContainerHandle_t container_handle, const DeviceBuilder &builder);
 
@@ -160,7 +168,7 @@ public:
 	void
 	set_haptic_handle(vr::VRInputComponentHandle_t handle);
 
-	void
+	xrt_result_t
 	get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation) override;
 
 	IndexFingerInput *
@@ -168,15 +176,19 @@ public:
 
 	void
 	get_hand_tracking(enum xrt_input_name name,
-	                  uint64_t desired_timestamp_ns,
+	                  int64_t desired_timestamp_ns,
 	                  struct xrt_hand_joint_set *out_value,
-	                  uint64_t *out_timestamp_ns);
+	                  int64_t *out_timestamp_ns);
 
 	xrt_hand
 	get_xrt_hand();
 
 	void
-	update_hand_tracking(struct xrt_hand_joint_set *out);
+	update_hand_tracking(int64_t desired_timestamp_ns, struct xrt_hand_joint_set *out);
+
+protected:
+	void
+	set_input_class(const InputClass *input_class);
 
 private:
 	vr::VRInputComponentHandle_t haptic_handle{0};

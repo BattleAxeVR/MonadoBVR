@@ -1,16 +1,16 @@
-// Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2018-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds Vulkan related functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <inttypes.h>
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -132,6 +132,10 @@ static const char *required_vk_device_extensions[] = {
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
     VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+    VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+    VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
     VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -425,6 +429,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	bool external_fence_fd_enabled = false;
 	bool external_semaphore_fd_enabled = false;
 #endif
+	bool image_format_list_enabled = false;
 
 	for (uint32_t i = 0; i < ARRAY_SIZE(optional_device_extensions); i++) {
 		// Empty list or a not supported extension.
@@ -443,6 +448,10 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 			external_semaphore_fd_enabled = true;
 		}
 #endif
+
+		if (strcmp(optional_device_extensions[i], VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME) == 0) {
+			image_format_list_enabled = true;
+		}
 	}
 
 	free(props);
@@ -546,6 +555,12 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	}
 #endif
 
+#ifdef VK_KHR_image_format_list
+	if (*vulkanResult == VK_SUCCESS) {
+		sys->vk.image_format_list_enabled = image_format_list_enabled;
+	}
+#endif
+
 	u_string_list_destroy(&device_extension_list);
 
 	return XR_SUCCESS;
@@ -561,7 +576,7 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
                            VkPhysicalDevice *vkPhysicalDevice)
 {
 	GET_PROC(vkEnumeratePhysicalDevices);
-	GET_PROC(vkGetPhysicalDeviceProperties2);
+	GET_PROC(vkGetPhysicalDeviceProperties2KHR);
 	VkResult vk_ret;
 	uint32_t count;
 
@@ -607,7 +622,7 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 		    .pNext = &pdidp,
 		};
 
-		vkGetPhysicalDeviceProperties2(phys[i], &pdp2);
+		vkGetPhysicalDeviceProperties2KHR(phys[i], &pdp2);
 
 		// These should always be true
 		static_assert(VK_UUID_SIZE == XRT_UUID_SIZE, "uuid sizes mismatch");

@@ -11,6 +11,7 @@
 
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_limits.h"
 #include "xrt/xrt_compositor.h"
 
 #include "os/os_time.h"
@@ -37,7 +38,7 @@ extern "C" {
  * @todo Move to `xrt_limits.h` and share.
  * @ingroup comp_multi
  */
-#define MULTI_MAX_LAYERS 16
+#define MULTI_MAX_LAYERS XRT_MAX_LAYERS
 
 
 /*
@@ -165,7 +166,7 @@ struct multi_compositor
 	/*!
 	 * The next which the next frames to be picked up will be displayed.
 	 */
-	uint64_t slot_next_frame_display;
+	int64_t slot_next_frame_display;
 
 	/*!
 	 * Currently being transferred or waited on.
@@ -183,6 +184,8 @@ struct multi_compositor
 	struct multi_layer_slot delivered;
 
 	struct u_pacing_app *upa;
+
+	float current_refresh_rate_hz;
 };
 
 /*!
@@ -225,7 +228,7 @@ multi_compositor_push_event(struct multi_compositor *mc, const union xrt_session
  * @private @memberof multi_compositor
  */
 void
-multi_compositor_deliver_any_frames(struct multi_compositor *mc, uint64_t display_time_ns);
+multi_compositor_deliver_any_frames(struct multi_compositor *mc, int64_t display_time_ns);
 
 /*!
  * Makes the current delivered frame as latched, called by the render thread.
@@ -235,7 +238,7 @@ multi_compositor_deliver_any_frames(struct multi_compositor *mc, uint64_t displa
  * @private @memberof multi_compositor
  */
 void
-multi_compositor_latch_frame_locked(struct multi_compositor *mc, uint64_t when_ns, int64_t system_frame_id);
+multi_compositor_latch_frame_locked(struct multi_compositor *mc, int64_t when_ns, int64_t system_frame_id);
 
 /*!
  * Clears and retires the delivered frame, called by the render thread.
@@ -245,7 +248,7 @@ multi_compositor_latch_frame_locked(struct multi_compositor *mc, uint64_t when_n
  * @private @memberof multi_compositor
  */
 void
-multi_compositor_retire_delivered_locked(struct multi_compositor *mc, uint64_t when_ns);
+multi_compositor_retire_delivered_locked(struct multi_compositor *mc, int64_t when_ns);
 
 
 /*
@@ -358,9 +361,9 @@ struct multi_system_compositor
 
 	struct
 	{
-		uint64_t predicted_display_time_ns;
-		uint64_t predicted_display_period_ns;
-		uint64_t diff_ns;
+		int64_t predicted_display_time_ns;
+		int64_t predicted_display_period_ns;
+		int64_t diff_ns;
 	} last_timings;
 
 	//! List of active clients.

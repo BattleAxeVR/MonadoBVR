@@ -54,8 +54,9 @@
 #endif
 
 #ifdef XRT_OS_ANDROID
-#include "android/android_globals.h"
+#include "xrt/xrt_android.h"
 #include "android/ipc_client_android.h"
+#include "android/android_instance_base.h"
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_WARN)
@@ -82,6 +83,10 @@ struct ipc_client_instance
 
 	struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES];
 	size_t xdev_count;
+
+#ifdef XRT_OS_ANDROID
+	struct android_instance_base android;
+#endif
 };
 
 static inline struct ipc_client_instance *
@@ -232,6 +237,11 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
 	}
 	ii->xtrack_count = 0;
 
+#ifdef XRT_OS_ANDROID
+	android_instance_base_cleanup(&(ii->android), xinst);
+	ipc_client_android_destroy(&(ii->ipc_c.ica));
+#endif // XRT_OS_ANDROID
+
 #ifdef XRT_OS_WINDOWS
 	timeEndPeriod(1);
 #endif
@@ -254,7 +264,7 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
  * @public @memberof ipc_instance
  */
 xrt_result_t
-ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_xinst)
+ipc_instance_create(const struct xrt_instance_info *i_info, struct xrt_instance **out_xinst)
 {
 	struct ipc_client_instance *ii = U_TYPED_CALLOC(struct ipc_client_instance);
 	ii->base.create_system = ipc_client_instance_create_system;
@@ -265,8 +275,20 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 	timeBeginPeriod(1);
 #endif
 
-	xrt_result_t xret = ipc_client_connection_init(&ii->ipc_c, debug_get_log_option_ipc_log(), i_info);
+	xrt_result_t xret;
+#ifdef XRT_OS_ANDROID
+	xret = android_instance_base_init(&ii->android, &ii->base, i_info);
 	if (xret != XRT_SUCCESS) {
+		free(ii);
+		return xret;
+	}
+#endif
+
+	xret = ipc_client_connection_init(&ii->ipc_c, debug_get_log_option_ipc_log(), i_info);
+	if (xret != XRT_SUCCESS) {
+#ifdef XRT_OS_ANDROID
+		android_instance_base_cleanup(&(ii->android), &(ii->base));
+#endif
 		free(ii);
 		return xret;
 	}
@@ -283,12 +305,12 @@ ipc_instance_create(struct xrt_instance_info *i_info, struct xrt_instance **out_
 		memcpy(xtrack->name, ism->itracks[i].name, sizeof(xtrack->name));
 
 		xtrack->type = ism->itracks[i].type;
-		xtrack->offset = ism->itracks[i].offset;
+		xtrack->initial_offset = ism->itracks[i].offset;
 		ii->xtracks[count++] = xtrack;
 
 		u_var_add_root(xtrack, "Tracking origin", true);
 		u_var_add_ro_text(xtrack, xtrack->name, "name");
-		u_var_add_pose(xtrack, &xtrack->offset, "offset");
+		u_var_add_pose(xtrack, &xtrack->initial_offset, "offset");
 	}
 
 	ii->xtrack_count = count;

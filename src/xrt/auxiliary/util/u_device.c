@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -203,6 +203,10 @@ u_device_setup_one_eye(struct xrt_device *xdev, const struct u_device_simple_inf
 bool
 u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device_simple_info *info)
 {
+	// 1 or 2 views supported.
+	assert(xdev->hmd->view_count > 0);
+	assert(xdev->hmd->view_count <= 2);
+	assert(xdev->hmd->view_count <= XRT_MAX_VIEWS);
 
 	uint32_t view_count = xdev->hmd->view_count;
 
@@ -316,7 +320,7 @@ u_device_allocate(enum u_device_alloc_flags flags, size_t size, size_t input_cou
 	if (alloc_tracking) {
 		xdev->tracking_origin = (struct xrt_tracking_origin *)(ptr + offset_tracking);
 		xdev->tracking_origin->type = XRT_TRACKING_TYPE_NONE;
-		xdev->tracking_origin->offset.orientation.w = 1.0f;
+		xdev->tracking_origin->initial_offset.orientation.w = 1.0f;
 		snprintf(xdev->tracking_origin->name, XRT_TRACKING_NAME_LEN, "%s", "No tracking");
 	}
 
@@ -448,7 +452,7 @@ u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index,
 void
 u_device_get_view_poses(struct xrt_device *xdev,
                         const struct xrt_vec3 *default_eye_relation,
-                        uint64_t at_timestamp_ns,
+                        int64_t at_timestamp_ns,
                         uint32_t view_count,
                         struct xrt_space_relation *out_head_relation,
                         struct xrt_fov *out_fovs,
@@ -472,10 +476,11 @@ u_device_get_view_poses(struct xrt_device *xdev,
  *
  */
 
-void
+xrt_result_t
 u_device_noop_update_inputs(struct xrt_device *xdev)
 {
 	// Empty, should only be used from a device without any inputs.
+	return XRT_SUCCESS;
 }
 
 
@@ -506,7 +511,7 @@ u_device_ni_set_output(struct xrt_device *xdev, enum xrt_output_name name, const
 void
 u_device_ni_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
-                           uint64_t at_timestamp_ns,
+                           int64_t at_timestamp_ns,
                            uint32_t view_count,
                            struct xrt_space_relation *out_head_relation,
                            struct xrt_fov *out_fovs,
@@ -530,7 +535,7 @@ u_device_ni_get_visibility_mask(struct xrt_device *xdev,
                                 struct xrt_visibility_mask **out_mask)
 {
 	E(get_visibility_mask);
-	return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
+	return XRT_ERROR_NOT_IMPLEMENTED;
 }
 
 bool
@@ -538,4 +543,11 @@ u_device_ni_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_fact
 {
 	E(is_form_factor_available);
 	return false;
+}
+
+xrt_result_t
+u_device_ni_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out_charging, float *out_charge)
+{
+	E(get_battery_status);
+	return XRT_ERROR_NOT_IMPLEMENTED;
 }

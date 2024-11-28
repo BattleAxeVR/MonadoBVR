@@ -1,9 +1,10 @@
-// Copyright 2022, Collabora, Ltd.
+// Copyright 2022-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief Basic Vulkan compositor tests.
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  */
 
 
@@ -14,8 +15,9 @@
 
 #undef Always
 #undef None
+#undef Success
 
-#include "catch/catch.hpp"
+#include "catch_amalgamated.hpp"
 #include "util/comp_vulkan.h"
 #include "util/u_logging.h"
 #include "util/u_string_list.h"
@@ -57,6 +59,10 @@ static const char *required_device_extensions[] = {
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
     VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+    VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+    VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
     VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -143,9 +149,10 @@ TEST_CASE("client_compositor", "[.][needgpu]")
 #else
 #error "Need port for fence sync handles checkers"
 #endif
-	    false,                  // debug_utils_enabled
-	    false,                  // renderdoc_enabled
-	    vk->queue_family_index, //
+	    vk->has_KHR_image_format_list, // image_format_list_enabled
+	    false,                         // debug_utils_enabled
+	    false,                         // renderdoc_enabled
+	    vk->queue_family_index,        //
 	    vk->queue_index);
 	struct xrt_compositor *xc = &xcvk->base;
 

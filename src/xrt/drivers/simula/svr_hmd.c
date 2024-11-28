@@ -72,17 +72,18 @@ svr_hmd_destroy(struct xrt_device *xdev)
 	u_device_free(&ns->base);
 }
 
-static void
+static xrt_result_t
 svr_hmd_get_tracked_pose(struct xrt_device *xdev,
                          enum xrt_input_name name,
-                         uint64_t at_timestamp_ns,
+                         int64_t at_timestamp_ns,
                          struct xrt_space_relation *out_relation)
 {
 	struct svr_hmd *ns = svr_hmd(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
 		SVR_ERROR(ns, "unknown input name");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&ns->base, ns->log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 
@@ -92,6 +93,8 @@ svr_hmd_get_tracked_pose(struct xrt_device *xdev,
 	    (struct xrt_pose)XRT_POSE_IDENTITY; // This is so that tracking overrides/multi driver just transforms us by
 	                                        // the tracker + offset from the tracker.
 	out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
+
+	return XRT_SUCCESS;
 }
 
 #define DEG_TO_RAD(DEG) (DEG * M_PI / 180.)
@@ -99,7 +102,7 @@ svr_hmd_get_tracked_pose(struct xrt_device *xdev,
 static void
 svr_hmd_get_view_poses(struct xrt_device *xdev,
                        const struct xrt_vec3 *default_eye_relation,
-                       uint64_t at_timestamp_ns,
+                       int64_t at_timestamp_ns,
                        uint32_t view_count,
                        struct xrt_space_relation *out_head_relation,
                        struct xrt_fov *out_fovs,

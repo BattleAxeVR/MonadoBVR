@@ -181,14 +181,27 @@ typedef enum xrt_result
 	XRT_ERROR_IPC_COMPOSITOR_NOT_CREATED = -28,
 
 	/*!
-	 * The function called on the device was not implemented, it is not
-	 * meant to query the availability of the function or feature, only a
-	 * error condition on bad code.
+	 * The interface function called is not implemented by its interface.
 	 */
-	XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED = -29,
+	XRT_ERROR_NOT_IMPLEMENTED = -29,
 
 	/*!
-	 * The function was not implemented in the compositor
+	 * The supplied space type is not supported for this operation.
 	 */
-	XRT_ERROR_COMPOSITOR_FUNCTION_NOT_IMPLEMENTED = -30,
+	XRT_ERROR_UNSUPPORTED_SPACE_TYPE = -30,
+
+	/*!
+	 * Some other Android error, typically a logic error that should be impossible to reach.
+	 */
+	XRT_ERROR_ANDROID = -31,
+
+	/*!
+	 * Returned when a feature is not supported by the device.
+	 */
+	XRT_ERROR_FEATURE_NOT_SUPPORTED = -32,
+
+	/*!
+	 * The input provided is a valid value from the enum xrt_input_name but is not supported by the driver.
+	 */
+	XRT_ERROR_INPUT_UNSUPPORTED = -33,
 } xrt_result_t;

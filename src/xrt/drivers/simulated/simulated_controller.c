@@ -46,8 +46,8 @@ struct simulated_device
 #define CHECK_THAT_NAME_IS_AND_ERROR(NAME)                                                                             \
 	do {                                                                                                           \
 		if (sd->base.name != NAME) {                                                                           \
-			U_LOG_E("Unknown input for controller %s 0x%02x", #NAME, name);                                \
-			return;                                                                                        \
+			U_LOG_XDEV_UNSUPPORTED_INPUT(&sd->base, u_log_get_global_level(), name);                       \
+			return XRT_ERROR_INPUT_UNSUPPORTED;                                                            \
 		}                                                                                                      \
 	} while (false)
 
@@ -93,32 +93,35 @@ simulated_device_destroy(struct xrt_device *xdev)
 	u_device_free(&sd->base);
 }
 
-static void
+static xrt_result_t
 simulated_device_update_inputs(struct xrt_device *xdev)
 {
 	struct simulated_device *sd = simulated_device(xdev);
 
 	uint64_t now = os_monotonic_get_ns();
 
+	// TODO refactor those loops into one
 	if (!sd->active) {
 		for (uint32_t i = 0; i < xdev->input_count; i++) {
 			xdev->inputs[i].active = false;
 			xdev->inputs[i].timestamp = now;
 			U_ZERO(&xdev->inputs[i].value);
 		}
-		return;
+		return XRT_SUCCESS;
 	}
 
 	for (uint32_t i = 0; i < xdev->input_count; i++) {
 		xdev->inputs[i].active = true;
 		xdev->inputs[i].timestamp = now;
 	}
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 simulated_device_get_tracked_pose(struct xrt_device *xdev,
                                   enum xrt_input_name name,
-                                  uint64_t at_timestamp_ns,
+                                  int64_t at_timestamp_ns,
                                   struct xrt_space_relation *out_relation)
 {
 	struct simulated_device *sd = simulated_device(xdev);
@@ -130,13 +133,15 @@ simulated_device_get_tracked_pose(struct xrt_device *xdev,
 	case XRT_INPUT_WMR_AIM_POSE: CHECK_THAT_NAME_IS_AND_ERROR(XRT_DEVICE_WMR_CONTROLLER); break;
 	case XRT_INPUT_ML2_CONTROLLER_GRIP_POSE:
 	case XRT_INPUT_ML2_CONTROLLER_AIM_POSE: CHECK_THAT_NAME_IS_AND_ERROR(XRT_DEVICE_ML2_CONTROLLER); break;
-	default: U_LOG_E("Unknown input name: 0x%0x", name); return;
+	default:
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&sd->base, u_log_get_global_level(), name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	if (!sd->active) {
 		out_relation->pose = (struct xrt_pose)XRT_POSE_IDENTITY;
 		out_relation->relation_flags = 0;
-		return;
+		return XRT_SUCCESS;
 	}
 
 	struct xrt_pose pose = sd->center;
@@ -157,14 +162,16 @@ simulated_device_get_tracked_pose(struct xrt_device *xdev,
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
 	    XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+
+	return XRT_SUCCESS;
 }
 
 static void
 simulated_device_get_hand_tracking(struct xrt_device *xdev,
                                    enum xrt_input_name name,
-                                   uint64_t requested_timestamp_ns,
+                                   int64_t requested_timestamp_ns,
                                    struct xrt_hand_joint_set *out_value,
-                                   uint64_t *out_timestamp_ns)
+                                   int64_t *out_timestamp_ns)
 {
 	assert(false);
 }
@@ -172,7 +179,7 @@ simulated_device_get_hand_tracking(struct xrt_device *xdev,
 static void
 simulated_device_get_view_poses(struct xrt_device *xdev,
                                 const struct xrt_vec3 *default_eye_relation,
-                                uint64_t at_timestamp_ns,
+                                int64_t at_timestamp_ns,
                                 uint32_t view_count,
                                 struct xrt_space_relation *out_head_relation,
                                 struct xrt_fov *out_fovs,

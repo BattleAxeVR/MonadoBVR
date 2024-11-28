@@ -273,7 +273,7 @@ arduino_run_thread(void *ptr)
  *
  */
 
-static void
+static xrt_result_t
 arduino_get_fusion_pose(struct arduino_device *ad, enum xrt_input_name name, struct xrt_space_relation *out_relation)
 {
 	out_relation->pose.orientation = ad->fusion.rot;
@@ -281,6 +281,8 @@ arduino_get_fusion_pose(struct arduino_device *ad, enum xrt_input_name name, str
 	//! @todo assuming that orientation is actually currently tracked.
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
 	                                                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -306,7 +308,7 @@ arduino_device_destroy(struct xrt_device *xdev)
 	free(ad);
 }
 
-static void
+static xrt_result_t
 arduino_device_update_inputs(struct xrt_device *xdev)
 {
 	struct arduino_device *ad = arduino_device(xdev);
@@ -327,18 +329,20 @@ arduino_device_update_inputs(struct xrt_device *xdev)
 
 	// Done now.
 	os_mutex_unlock(&ad->lock);
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 arduino_device_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
-                                uint64_t at_timestamp_ns,
+                                int64_t at_timestamp_ns,
                                 struct xrt_space_relation *out_relation)
 {
 	struct arduino_device *ad = arduino_device(xdev);
 
 	(void)at_timestamp_ns;
-	arduino_get_fusion_pose(ad, name, out_relation);
+	return arduino_get_fusion_pose(ad, name, out_relation);
 }
 
 

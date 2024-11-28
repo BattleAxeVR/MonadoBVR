@@ -13,6 +13,7 @@
 #include "wrap/android.app.h"
 #include "wrap/android.content.h"
 #include "wrap/android.view.h"
+#include <vector>
 
 
 namespace wrap {
@@ -63,6 +64,21 @@ namespace org::freedesktop::monado::auxiliary {
 		                                          displayId, displayModeId);
 	}
 
+	inline std::vector<float>
+	MonadoView::getSupportedRefreshRates(android::content::Context const &context)
+	{
+		jni::Object refreshRateArray =
+		    Meta::data().clazz().call<jni::Object>(Meta::data().getSupportedRefreshRates, context.object());
+		jfloat *refreshRates =
+		    (jfloat *)jni::env()->GetFloatArrayElements((jfloatArray)refreshRateArray.getHandle(), 0);
+		jsize length = jni::env()->GetArrayLength((jfloatArray)refreshRateArray.getHandle());
+		std::vector<float> refreshRateVector;
+		for (int i = 0; i < length; i++) {
+			refreshRateVector.push_back(refreshRates[i]);
+		}
+		return refreshRateVector;
+	}
+
 	inline void *
 	MonadoView::getNativePointer()
 	{
@@ -86,5 +102,23 @@ namespace org::freedesktop::monado::auxiliary {
 		    object().call<jni::Object>(Meta::data().waitGetSurfaceHolder, wait_ms));
 	}
 
+	inline ActivityLifecycleListener
+	ActivityLifecycleListener::construct(void *nativePointer)
+	{
+		return ActivityLifecycleListener(Meta::data().clazz().newInstance(
+		    Meta::data().init, static_cast<long long>(reinterpret_cast<uintptr_t>(nativePointer))));
+	}
+
+	inline void
+	ActivityLifecycleListener::registerCallback(android::app::Activity const &activity)
+	{
+		object().call<void>(Meta::data().registerCallback, activity.object());
+	}
+
+	inline void
+	ActivityLifecycleListener::unregisterCallback(android::app::Activity const &activity)
+	{
+		object().call<void>(Meta::data().unregisterCallback, activity.object());
+	}
 } // namespace org::freedesktop::monado::auxiliary
 } // namespace wrap

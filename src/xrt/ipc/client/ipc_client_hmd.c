@@ -63,7 +63,7 @@ ipc_client_hmd(struct xrt_device *xdev)
 static void
 call_get_view_poses_raw(ipc_client_hmd_t *ich,
                         const struct xrt_vec3 *default_eye_relation,
-                        uint64_t at_timestamp_ns,
+                        int64_t at_timestamp_ns,
                         uint32_t view_count,
                         struct xrt_space_relation *out_head_relation,
                         struct xrt_fov *out_fovs,
@@ -140,19 +140,19 @@ ipc_client_hmd_destroy(struct xrt_device *xdev)
 	u_device_free(&ich->base);
 }
 
-static void
+static xrt_result_t
 ipc_client_hmd_update_inputs(struct xrt_device *xdev)
 {
 	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
 
 	xrt_result_t xret = ipc_call_device_update_input(ich->ipc_c, ich->device_id);
-	IPC_CHK_ONLY_PRINT(ich->ipc_c, xret, "ipc_call_device_update_input");
+	IPC_CHK_ALWAYS_RET(ich->ipc_c, xret, "ipc_call_device_update_input");
 }
 
-static void
+static xrt_result_t
 ipc_client_hmd_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
-                                uint64_t at_timestamp_ns,
+                                int64_t at_timestamp_ns,
                                 struct xrt_space_relation *out_relation)
 {
 	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
@@ -164,13 +164,13 @@ ipc_client_hmd_get_tracked_pose(struct xrt_device *xdev,
 	    name,                                //
 	    at_timestamp_ns,                     //
 	    out_relation);                       //
-	IPC_CHK_ONLY_PRINT(ich->ipc_c, xret, "ipc_call_device_get_tracked_pose");
+	IPC_CHK_ALWAYS_RET(ich->ipc_c, xret, "ipc_call_device_get_tracked_pose");
 }
 
 static void
 ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
                               const struct xrt_vec3 *default_eye_relation,
-                              uint64_t at_timestamp_ns,
+                              int64_t at_timestamp_ns,
                               uint32_t view_count,
                               struct xrt_space_relation *out_head_relation,
                               struct xrt_fov *out_fovs,
@@ -214,6 +214,23 @@ ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
 		          (uint32_t)IPC_MAX_RAW_VIEWS);
 		assert(false && !"Too large view_count!");
 	}
+}
+
+static xrt_result_t
+ipc_client_hmd_get_face_tracking(struct xrt_device *xdev,
+                                 enum xrt_input_name facial_expression_type,
+                                 int64_t at_timestamp_ns,
+                                 struct xrt_facial_expression_set *out_value)
+{
+	ipc_client_hmd_t *icd = ipc_client_hmd(xdev);
+
+	xrt_result_t xret = ipc_call_device_get_face_tracking( //
+	    icd->ipc_c,                                        //
+	    icd->device_id,                                    //
+	    facial_expression_type,                            //
+	    at_timestamp_ns,                                   //
+	    out_value);                                        //
+	IPC_CHK_ALWAYS_RET(icd->ipc_c, xret, "ipc_call_device_get_face_tracking");
 }
 
 static bool
@@ -312,6 +329,7 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	ich->device_id = device_id;
 	ich->base.update_inputs = ipc_client_hmd_update_inputs;
 	ich->base.get_tracked_pose = ipc_client_hmd_get_tracked_pose;
+	ich->base.get_face_tracking = ipc_client_hmd_get_face_tracking;
 	ich->base.get_view_poses = ipc_client_hmd_get_view_poses;
 	ich->base.compute_distortion = ipc_client_hmd_compute_distortion;
 	ich->base.destroy = ipc_client_hmd_destroy;
@@ -377,6 +395,7 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	ich->base.force_feedback_supported = isdev->force_feedback_supported;
 	ich->base.form_factor_check_supported = isdev->form_factor_check_supported;
 	ich->base.stage_supported = isdev->stage_supported;
+	ich->base.battery_status_supported = isdev->battery_status_supported;
 
 	return &ich->base;
 }

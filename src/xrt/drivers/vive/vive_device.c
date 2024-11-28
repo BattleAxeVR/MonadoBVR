@@ -95,16 +95,18 @@ vive_device_destroy(struct xrt_device *xdev)
 	u_device_free(&d->base);
 }
 
-static void
+static xrt_result_t
 vive_device_update_inputs(struct xrt_device *xdev)
 {
 	XRT_TRACE_MARKER();
 
 	struct vive_device *d = vive_device(xdev);
 	VIVE_TRACE(d, "ENTER!");
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 vive_device_get_3dof_tracked_pose(struct xrt_device *xdev,
                                   enum xrt_input_name name,
                                   uint64_t at_timestamp_ns,
@@ -115,8 +117,8 @@ vive_device_get_3dof_tracked_pose(struct xrt_device *xdev,
 	struct vive_device *d = vive_device(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
-		U_LOG_E("unknown input name");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&d->base, u_log_get_global_level(), name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	struct xrt_space_relation relation = {0};
@@ -129,6 +131,8 @@ vive_device_get_3dof_tracked_pose(struct xrt_device *xdev,
 
 	*out_relation = relation;
 	d->pose = out_relation->pose;
+
+	return XRT_SUCCESS;
 }
 
 //! Specific pose corrections for Basalt and a Valve Index headset
@@ -177,10 +181,10 @@ vive_device_get_slam_tracked_pose(struct xrt_device *xdev,
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
 }
 
-static void
+static xrt_result_t
 vive_device_get_tracked_pose(struct xrt_device *xdev,
                              enum xrt_input_name name,
-                             uint64_t at_timestamp_ns,
+                             int64_t at_timestamp_ns,
                              struct xrt_space_relation *out_relation)
 {
 	XRT_TRACE_MARKER();
@@ -188,20 +192,26 @@ vive_device_get_tracked_pose(struct xrt_device *xdev,
 	struct vive_device *d = vive_device(xdev);
 
 	// Ajdust the timestamp with the offset.
-	at_timestamp_ns += (uint64_t)(d->tracked_offset_ms.val * (double)U_TIME_1MS_IN_NS);
+	at_timestamp_ns += (int64_t)(d->tracked_offset_ms.val * (double)U_TIME_1MS_IN_NS);
 
+	xrt_result_t xret = XRT_SUCCESS;
 	if (d->tracking.slam_enabled && d->slam_over_3dof) {
 		vive_device_get_slam_tracked_pose(xdev, name, at_timestamp_ns, out_relation);
 	} else {
-		vive_device_get_3dof_tracked_pose(xdev, name, at_timestamp_ns, out_relation);
+		xret = vive_device_get_3dof_tracked_pose(xdev, name, at_timestamp_ns, out_relation);
 	}
-	math_pose_transform(&d->offset, &out_relation->pose, &out_relation->pose);
+
+	if (xret == XRT_SUCCESS) {
+		math_pose_transform(&d->offset, &out_relation->pose, &out_relation->pose);
+	}
+
+	return xret;
 }
 
 static void
 vive_device_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
-                           uint64_t at_timestamp_ns,
+                           int64_t at_timestamp_ns,
                            uint32_t view_count,
                            struct xrt_space_relation *out_head_relation,
                            struct xrt_fov *out_fovs,
@@ -882,8 +892,8 @@ vive_sensors_run_thread(void *ptr)
 	 * read packets with a noop function for 50ms.
 	 */
 
-	uint64_t then_ns = os_monotonic_get_ns();
-	uint64_t future_50ms_ns = then_ns + U_TIME_1MS_IN_NS * (uint64_t)50;
+	int64_t then_ns = os_monotonic_get_ns();
+	int64_t future_50ms_ns = then_ns + U_TIME_1MS_IN_NS * (int64_t)50;
 
 	while (future_50ms_ns > os_monotonic_get_ns() && os_thread_helper_is_running(&d->sensors_thread)) {
 		// Lock not held.

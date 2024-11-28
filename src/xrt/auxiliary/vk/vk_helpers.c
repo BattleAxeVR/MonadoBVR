@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,6 +14,7 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
  * @author Moses Turner <moses@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_vk
  */
 
@@ -82,8 +83,6 @@ vk_result_string(VkResult code)
 		ENUM_TO_STR(VK_ERROR_UNKNOWN); // Only defined in 1.2 and above headers.
 		ENUM_TO_STR(VK_ERROR_FRAGMENTATION);
 		ENUM_TO_STR(VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS);
-#else
-	case -13 /* VK_ERROR_UNKNOWN */: return "VK_ERROR_UNKNOWN"; // Has no guard.
 #endif
 #ifdef VK_VERSION_1_3
 		ENUM_TO_STR(VK_PIPELINE_COMPILE_REQUIRED);
@@ -806,28 +805,15 @@ vk_get_memory_type(struct vk_bundle *vk, uint32_t type_bits, VkMemoryPropertyFla
 XRT_CHECK_RESULT VkResult
 vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
                                VkImage image,
-                               size_t max_size,
+                               const VkMemoryRequirements *requirements,
                                const void *pNext_for_allocate,
                                const char *caller_name,
-                               VkDeviceMemory *out_mem,
-                               VkDeviceSize *out_size)
+                               VkDeviceMemory *out_mem)
 {
-	VkMemoryRequirements memory_requirements;
-	vk->vkGetImageMemoryRequirements(vk->device, image, &memory_requirements);
-
-	if (max_size > 0 && memory_requirements.size > max_size) {
-		VK_ERROR(vk, "(%s) vkGetImageMemoryRequirements: Requested more memory (%u) then given (%u)\n",
-		         caller_name, (uint32_t)memory_requirements.size, (uint32_t)max_size);
-		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-	}
-	if (out_size != NULL) {
-		*out_size = memory_requirements.size;
-	}
-
 	uint32_t memory_type_index = UINT32_MAX;
 	bool bret = vk_get_memory_type(          //
 	    vk,                                  // vk_bundle
-	    memory_requirements.memoryTypeBits,  // type_bits
+	    requirements->memoryTypeBits,        // type_bits
 	    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // memory_props
 	    &memory_type_index);                 // out_type_id
 	if (!bret) {
@@ -838,7 +824,7 @@ vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
 	VkMemoryAllocateInfo alloc_info = {
 	    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 	    .pNext = pNext_for_allocate,
-	    .allocationSize = memory_requirements.size,
+	    .allocationSize = requirements->size,
 	    .memoryTypeIndex = memory_type_index,
 	};
 
@@ -903,14 +889,16 @@ create_image_simple(struct vk_bundle *vk,
 		return ret;
 	}
 
+	VkMemoryRequirements requirements = {0};
+	vk->vkGetImageMemoryRequirements(vk->device, image, &requirements);
+
 	ret = vk_alloc_and_bind_image_memory( //
 	    vk,                               // vk_bundle
 	    image,                            // image
-	    SIZE_MAX,                         // max_size
+	    &requirements,                    // max_size
 	    NULL,                             // pNext_for_allocate
 	    __func__,                         // caller_name
-	    out_mem,                          // out_mem
-	    NULL);                            // out_size
+	    out_mem);                         // out_mem
 	if (ret != VK_SUCCESS) {
 		// Clean up image
 		vk->vkDestroyImage(vk->device, image, NULL);
@@ -1076,6 +1064,13 @@ err_image:
 	return ret;
 }
 
+// - vk_csci_get_image_external_handle_type (usually but not always a constant)
+// - vk_csci_get_image_external_support
+//   - vkGetPhysicalDeviceImageFormatProperties2
+// - vkCreateImage
+// - vkGetImageMemoryRequirements
+// - maybe vkGetAndroidHardwareBufferPropertiesANDROID
+// - vk_alloc_and_bind_image_memory
 XRT_CHECK_RESULT VkResult
 vk_create_image_from_native(struct vk_bundle *vk,
                             const struct xrt_swapchain_create_info *info,
@@ -1091,13 +1086,13 @@ vk_create_image_from_native(struct vk_bundle *vk,
 #ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
 	/*
 	 * Some Vulkan drivers will natively support importing and exporting
-	 * SRGB formats (Qualcomm) even tho technically that's not intended
-	 * by the AHardwareBuffer since they don't support sRGB formats.
-	 * While others (Mail) does not support importing and exporting sRGB
-	 * formats. So we need to create the image without sRGB and then create
-	 * the image views with sRGB which is allowed by the Vulkan spec. It
-	 * seems to be safe to do with on all drivers, so to reduce the logic
-	 * do that instead.
+	 * SRGB formats (Qualcomm Adreno) even though technically the
+	 * AHardwareBuffer support for sRGB is... awkward (not inherent).
+	 * While others (arm Mali) does not support importing and exporting
+	 * sRGB formats. So we need to create the image without sRGB and
+	 * then create the image views with sRGB which is allowed by the
+	 * Vulkan spec. It seems to be safe to do with on all drivers,
+	 * so to reduce the logic do that instead.
 	 */
 	if (image_format == VK_FORMAT_R8G8B8A8_SRGB) {
 		image_format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -1123,16 +1118,43 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
+	VkImageCreateFlags image_create_flags = 0;
+	// Set the image create mutable flag if usage mutable is given.
+	const bool has_mutable_usage = (info->bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0;
+	if (has_mutable_usage) {
+		image_create_flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+	}
+
+	const bool has_create_protected_content = (info->create & XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT) != 0;
+	if (has_create_protected_content) {
+		image_create_flags |= VK_IMAGE_CREATE_PROTECTED_BIT;
+	}
+
 	// In->pNext
 	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
 	    .handleTypes = handle_type,
 	};
 
+#ifdef VK_KHR_image_format_list
+	VkImageFormatListCreateInfoKHR image_format_list_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
+	    .pNext = NULL,
+	    .viewFormatCount = info->format_count,
+	    .pViewFormats = info->formats,
+	};
+	const bool has_mutable_format_list =
+	    has_mutable_usage && vk->has_KHR_image_format_list && info->format_count > 0;
+	if (has_mutable_format_list) {
+		external_memory_image_create_info.pNext = &image_format_list_create_info;
+	}
+#endif
+
 	// In
 	VkImageCreateInfo vk_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 	    .pNext = &external_memory_image_create_info,
+	    .flags = image_create_flags,
 	    .imageType = VK_IMAGE_TYPE_2D,
 	    .format = image_format,
 	    .extent = {.width = info->width, .height = info->height, .depth = 1},
@@ -1145,10 +1167,6 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
 
-	if (0 != (info->create & XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT)) {
-		vk_info.flags |= VK_IMAGE_CREATE_PROTECTED_BIT;
-	}
-
 	VkImage image = VK_NULL_HANDLE;
 	ret = vk->vkCreateImage(vk->device, &vk_info, NULL, &image);
 	if (ret != VK_SUCCESS) {
@@ -1156,18 +1174,37 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		// Nothing to cleanup
 		return ret;
 	}
+
+	VkMemoryRequirements requirements = {0};
+	vk->vkGetImageMemoryRequirements(vk->device, image, &requirements);
+
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	VkImportMemoryFdInfoKHR import_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
 	    .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR,
 	    .fd = image_native->handle,
 	};
+
+	// TODO memoryTypeBits from VkMemoryFdPropertiesKHR
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	VkImportAndroidHardwareBufferInfoANDROID import_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
 	    .pNext = NULL,
 	    .buffer = image_native->handle,
 	};
+
+	VkAndroidHardwareBufferPropertiesANDROID ahb_props = {
+	    .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,
+	};
+
+	ret = vk->vkGetAndroidHardwareBufferPropertiesANDROID(vk->device, image_native->handle, &ahb_props);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vkGetAndroidHardwareBufferPropertiesANDROID: %s", vk_result_string(ret));
+		return ret;
+	}
+
+	requirements.size = ahb_props.allocationSize;
+	requirements.memoryTypeBits = ahb_props.memoryTypeBits;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
 	VkImportMemoryWin32HandleInfoKHR import_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR,
@@ -1175,9 +1212,43 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	    .handleType = handle_type,
 	    .handle = image_native->handle,
 	};
+
+	// TODO memoryTypeBits from VkMemoryWin32HandlePropertiesKHR
 #else
 #error "need port"
 #endif
+
+	if (handle_type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID) {
+		/*
+		 * Skip check in this case
+		 * VUID-VkMemoryAllocateInfo-allocationSize-02383
+		 * For AHardwareBuffer handles, the alloc size must be the size returned by
+		 * vkGetAndroidHardwareBufferPropertiesANDROID for the Android hardware buffer
+		 */
+	} else if ((handle_type & (VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT |
+	                           VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT |
+	                           VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT)) != 0) {
+
+		/*
+		 * For VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT and friends,
+		 * the size must be queried by the implementation (See VkMemoryAllocateInfo manual page)
+		 * so skip size check
+		 */
+	} else if (requirements.size == 0) {
+		/*
+		 * VUID-VkMemoryAllocateInfo-allocationSize-07899
+		 * For any handles other than AHardwareBuffer, size must be greater than 0
+		 */
+		VK_ERROR(vk, "size must be greater than 0");
+
+	} else if (requirements.size > image_native->size) {
+		VK_ERROR(vk, "size mismatch, exported %" PRIu64 " but requires %" PRIu64, image_native->size,
+		         requirements.size);
+		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+	} else if (requirements.size < image_native->size) {
+		// it's OK if we have more memory than we need, APIs can round up
+	}
+
 	VkMemoryDedicatedAllocateInfoKHR dedicated_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR,
 	    .pNext = &import_memory_info,
@@ -1188,11 +1259,10 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	ret = vk_alloc_and_bind_image_memory( //
 	    vk,                               // vk_bundle
 	    image,                            // image
-	    image_native->size,               // max_size
+	    &requirements,                    // requirements
 	    &dedicated_memory_info,           // pNext_for_allocate
 	    __func__,                         // caller_name
-	    out_mem,                          // out_mem
-	    NULL);                            // out_size
+	    out_mem);                         // out_mem
 
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_CONSUMED_BY_VULKAN_IMPORT)
 	// We have consumed this fd now, make sure it's not freed again.

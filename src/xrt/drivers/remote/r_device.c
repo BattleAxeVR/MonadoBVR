@@ -50,7 +50,7 @@ r_device_destroy(struct xrt_device *xdev)
 	u_device_free(&rd->base);
 }
 
-static void
+static xrt_result_t
 r_device_update_inputs(struct xrt_device *xdev)
 {
 	struct r_device *rd = r_device(xdev);
@@ -59,13 +59,14 @@ r_device_update_inputs(struct xrt_device *xdev)
 	uint64_t now = os_monotonic_get_ns();
 	struct r_remote_controller_data *latest = rd->is_left ? &r->latest.left : &r->latest.right;
 
+	// TODO: refactor those loops into one
 	if (!latest->active) {
 		for (uint32_t i = 0; i < xdev->input_count; i++) {
 			xdev->inputs[i].active = false;
 			xdev->inputs[i].timestamp = now;
 			U_ZERO(&xdev->inputs[i].value);
 		}
-		return;
+		return XRT_SUCCESS;
 	}
 
 	for (uint32_t i = 0; i < xdev->input_count; i++) {
@@ -92,12 +93,14 @@ r_device_update_inputs(struct xrt_device *xdev)
 	xdev->inputs[15].value.vec1    = latest->trackpad_force;
 	xdev->inputs[16].value.boolean = latest->trackpad_touch;
 	// clang-format on
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 r_device_get_tracked_pose(struct xrt_device *xdev,
                           enum xrt_input_name name,
-                          uint64_t at_timestamp_ns,
+                          int64_t at_timestamp_ns,
                           struct xrt_space_relation *out_relation)
 {
 	struct r_device *rd = r_device(xdev);
@@ -105,8 +108,8 @@ r_device_get_tracked_pose(struct xrt_device *xdev,
 
 	if (name != XRT_INPUT_INDEX_AIM_POSE && name != XRT_INPUT_INDEX_GRIP_POSE &&
 	    name != XRT_INPUT_GENERIC_PALM_POSE) {
-		U_LOG_E("Unknown input name: 0x%0x", name);
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&rd->base, u_log_get_global_level(), name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	struct r_remote_controller_data *latest = rd->is_left ? &r->latest.left : &r->latest.right;
@@ -130,14 +133,16 @@ r_device_get_tracked_pose(struct xrt_device *xdev,
 	} else {
 		out_relation->relation_flags = 0;
 	}
+
+	return XRT_SUCCESS;
 }
 
 static void
 r_device_get_hand_tracking(struct xrt_device *xdev,
                            enum xrt_input_name name,
-                           uint64_t requested_timestamp_ns,
+                           int64_t requested_timestamp_ns,
                            struct xrt_hand_joint_set *out_value,
-                           uint64_t *out_timestamp_ns)
+                           int64_t *out_timestamp_ns)
 {
 	struct r_device *rd = r_device(xdev);
 	struct r_hub *r = rd->r;
@@ -175,7 +180,7 @@ r_device_get_hand_tracking(struct xrt_device *xdev,
 static void
 r_device_get_view_poses(struct xrt_device *xdev,
                         const struct xrt_vec3 *default_eye_relation,
-                        uint64_t at_timestamp_ns,
+                        int64_t at_timestamp_ns,
                         uint32_t view_count,
                         struct xrt_space_relation *out_head_relation,
                         struct xrt_fov *out_fovs,

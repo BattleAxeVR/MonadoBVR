@@ -62,6 +62,18 @@
 		]
 	},
 
+	"system_devices_begin_feature": {
+		"in": [
+			{"name": "type", "type": "enum xrt_device_feature_type"}
+		]
+	},
+
+	"system_devices_end_feature": {
+		"in": [
+			{"name": "type", "type": "enum xrt_device_feature_type"}
+		]
+	},
+
 	"system_compositor_get_info": {
 		"out": [
 			{"name": "info", "type": "struct xrt_system_compositor_info"}
@@ -122,7 +134,7 @@
 		"in": [
 			{"name": "base_space_id", "type": "uint32_t"},
 			{"name": "base_offset", "type": "struct xrt_pose"},
-			{"name": "at_timestamp", "type": "uint64_t"},
+			{"name": "at_timestamp", "type": "int64_t"},
 			{"name": "space_id", "type": "uint32_t"},
 			{"name": "offset", "type": "struct xrt_pose"}
 		],
@@ -137,7 +149,7 @@
 			{"name": "base_space_id", "type": "uint32_t"},
 			{"name": "base_offset", "type": "struct xrt_pose"},
 			{"name": "space_count", "type": "uint32_t"},
-			{"name": "at_timestamp", "type": "uint64_t"}
+			{"name": "at_timestamp", "type": "int64_t"}
 		]
 	},
 
@@ -145,7 +157,7 @@
 		"in": [
 			{"name": "base_space_id", "type": "uint32_t"},
 			{"name": "base_offset", "type": "struct xrt_pose"},
-			{"name": "at_timestamp", "type": "uint64_t"},
+			{"name": "at_timestamp", "type": "int64_t"},
 			{"name": "xdev_id", "type": "uint32_t"}
 		],
 		"out": [
@@ -174,6 +186,38 @@
 	"space_recenter_local_spaces": {
 	},
 
+	"space_get_tracking_origin_offset": {
+		"in": [
+			{"name": "origin_id", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "offset", "type": "struct xrt_pose"}
+		]
+	},
+
+	"space_set_tracking_origin_offset": {
+		"in": [
+			{"name": "origin_id", "type": "uint32_t"},
+			{"name": "offset", "type": "struct xrt_pose"}
+		]
+	},
+
+	"space_get_reference_space_offset": {
+		"in": [
+			{"name": "type", "type": "enum xrt_reference_space_type"}
+        ],
+		"out": [
+			{"name": "offset", "type": "struct xrt_pose"}
+		]
+	},
+
+	"space_set_reference_space_offset": {
+		"in": [
+			{"name": "type", "type": "enum xrt_reference_space_type"},
+			{"name": "offset", "type": "struct xrt_pose"}
+		]
+	},
+
 	"compositor_get_info": {
 		"out": [
 			{"name": "info", "type": "struct xrt_compositor_info"}
@@ -183,9 +227,9 @@
 	"compositor_predict_frame": {
 		"out": [
 			{"name": "frame_id", "type": "int64_t"},
-			{"name": "wake_up_time", "type": "uint64_t"},
-			{"name": "predicted_display_time", "type": "uint64_t"},
-			{"name": "predicted_display_period", "type": "uint64_t"}
+			{"name": "wake_up_time", "type": "int64_t"},
+			{"name": "predicted_display_time", "type": "int64_t"},
+			{"name": "predicted_display_period", "type": "int64_t"}
 		]
 	},
 
@@ -313,7 +357,7 @@
 	"swapchain_wait_image": {
 		"in": [
 			{"name": "id", "type": "uint32_t"},
-			{"name": "timeout_ns", "type": "uint64_t"},
+			{"name": "timeout_ns", "type": "int64_t"},
 			{"name": "index", "type": "uint32_t"}
 		]
 	},
@@ -363,7 +407,7 @@
 		"in": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "name", "type": "enum xrt_input_name"},
-			{"name": "at_timestamp", "type": "uint64_t"}
+			{"name": "at_timestamp", "type": "int64_t"}
 		],
 		"out": [
 			{"name": "relation", "type": "struct xrt_space_relation"}
@@ -374,11 +418,11 @@
 		"in": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "name", "type": "enum xrt_input_name"},
-			{"name": "at_timestamp", "type": "uint64_t"}
+			{"name": "at_timestamp", "type": "int64_t"}
 		],
 		"out": [
 			{"name": "value", "type": "struct xrt_hand_joint_set"},
-			{"name": "timestamp", "type": "uint64_t"}
+			{"name": "timestamp", "type": "int64_t"}
 		]
 	},
 
@@ -387,7 +431,7 @@
 		"in": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "fallback_eye_relation", "type": "struct xrt_vec3"},
-			{"name": "at_timestamp_ns", "type": "uint64_t"},
+			{"name": "at_timestamp_ns", "type": "int64_t"},
 			{"name": "view_count", "type": "uint32_t"}
 		],
 		"out": [
@@ -400,7 +444,7 @@
 		"in": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "fallback_eye_relation", "type": "struct xrt_vec3"},
-			{"name": "at_timestamp_ns", "type": "uint64_t"},
+			{"name": "at_timestamp_ns", "type": "int64_t"},
 			{"name": "view_count", "type": "uint32_t"}
 		],
 		"out": [
@@ -454,7 +498,8 @@
 	"device_get_face_tracking": {
 		"in": [
 			{"name": "id", "type": "uint32_t"},
-			{"name": "facial_expression_type", "type": "enum xrt_input_name"}
+			{"name": "facial_expression_type", "type": "enum xrt_input_name"},
+			{"name": "at_timestamp_ns", "type": "int64_t"}
 		],
 		"out": [
 			{"name": "value", "type": "struct xrt_facial_expression_set"}
@@ -475,10 +520,21 @@
 		"in": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "body_tracking_type", "type": "enum xrt_input_name"},
-			{"name": "desired_timestamp_ns", "type": "uint64_t"}
+			{"name": "desired_timestamp_ns", "type": "int64_t"}
 		],
 		"out": [
 			{"name": "value", "type": "struct xrt_body_joint_set"}
+		]
+	},
+
+	"device_get_battery_status": {
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "present", "type": "bool"},
+			{"name": "charging", "type": "bool"},
+			{"name": "charge", "type": "float"}
 		]
 	}
 

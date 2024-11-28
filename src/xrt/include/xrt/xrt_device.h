@@ -220,6 +220,17 @@ struct xrt_binding_profile
 };
 
 /*!
+ * Higher level features for devices.
+ */
+enum xrt_device_feature_type
+{
+	XRT_DEVICE_FEATURE_HAND_TRACKING_LEFT = 0,
+	XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT,
+	XRT_DEVICE_FEATURE_EYE_TRACKING,
+	XRT_DEVICE_FEATURE_MAX_ENUM,
+};
+
+/*!
  * @interface xrt_device
  *
  * A single HMD or input device.
@@ -269,6 +280,7 @@ struct xrt_device
 	bool stage_supported;
 	bool face_tracking_supported;
 	bool body_tracking_supported;
+	bool battery_status_supported;
 
 	/*
 	 *
@@ -281,7 +293,7 @@ struct xrt_device
 	 *
 	 * @param[in] xdev        The device.
 	 */
-	void (*update_inputs)(struct xrt_device *xdev);
+	xrt_result_t (*update_inputs)(struct xrt_device *xdev);
 
 	/*!
 	 * @brief Get relationship of a tracked device to the tracking origin
@@ -307,10 +319,10 @@ struct xrt_device
 	 *
 	 * @see xrt_input_name
 	 */
-	void (*get_tracked_pose)(struct xrt_device *xdev,
-	                         enum xrt_input_name name,
-	                         uint64_t at_timestamp_ns,
-	                         struct xrt_space_relation *out_relation);
+	xrt_result_t (*get_tracked_pose)(struct xrt_device *xdev,
+	                                 enum xrt_input_name name,
+	                                 int64_t at_timestamp_ns,
+	                                 struct xrt_space_relation *out_relation);
 
 	/*!
 	 * @brief Get relationship of hand joints to the tracking origin space as
@@ -337,9 +349,9 @@ struct xrt_device
 	 */
 	void (*get_hand_tracking)(struct xrt_device *xdev,
 	                          enum xrt_input_name name,
-	                          uint64_t desired_timestamp_ns,
+	                          int64_t desired_timestamp_ns,
 	                          struct xrt_hand_joint_set *out_value,
-	                          uint64_t *out_timestamp_ns);
+	                          int64_t *out_timestamp_ns);
 
 	/*!
 	 * @brief Get the requested blend shape properties & weights for a face tracker
@@ -347,12 +359,15 @@ struct xrt_device
 	 * @param[in] xdev                    The device.
 	 * @param[in] facial_expression_type  The facial expression data type (XR_FB_face_tracking,
 	 * XR_HTC_facial_tracking, etc).
+	 * @param[in] at_timestamp_ns         Timestamp to be optionally used for prediction/history. For OXR extensions
+	 * that do not pass a timestamp, the current timestamp is used.
 	 * @param[in] out_value               Set of requested expression weights & blend shape properties.
 	 *
 	 * @see xrt_input_name
 	 */
 	xrt_result_t (*get_face_tracking)(struct xrt_device *xdev,
 	                                  enum xrt_input_name facial_expression_type,
+	                                  int64_t at_timestamp_ns,
 	                                  struct xrt_facial_expression_set *out_value);
 
 	/*!
@@ -383,7 +398,7 @@ struct xrt_device
 	 */
 	xrt_result_t (*get_body_joints)(struct xrt_device *xdev,
 	                                enum xrt_input_name body_tracking_type,
-	                                uint64_t desired_timestamp_ns,
+	                                int64_t desired_timestamp_ns,
 	                                struct xrt_body_joint_set *out_value);
 
 	/*!
@@ -435,7 +450,7 @@ struct xrt_device
 	 */
 	void (*get_view_poses)(struct xrt_device *xdev,
 	                       const struct xrt_vec3 *default_eye_relation,
-	                       uint64_t at_timestamp_ns,
+	                       int64_t at_timestamp_ns,
 	                       uint32_t view_count,
 	                       struct xrt_space_relation *out_head_relation,
 	                       struct xrt_fov *out_fovs,
@@ -503,6 +518,35 @@ struct xrt_device
 	bool (*is_form_factor_available)(struct xrt_device *xdev, enum xrt_form_factor form_factor);
 
 	/*!
+	 * @brief Get battery status information.
+	 *
+	 * @param[in] xdev          The device.
+	 * @param[out] out_present  Whether battery status information exist for this device.
+	 * @param[out] out_charging Whether the device's battery is being charged.
+	 * @param[out] out_charge   Battery charge as a value between 0 and 1.
+	 */
+	xrt_result_t (*get_battery_status)(struct xrt_device *xdev,
+	                                   bool *out_present,
+	                                   bool *out_charging,
+	                                   float *out_charge);
+
+	/*!
+	 * Enable the feature for this device.
+	 *
+	 * @param[in] xdev        The device.
+	 * @param[in] type        The type of device feature.
+	 */
+	xrt_result_t (*begin_feature)(struct xrt_device *xdev, enum xrt_device_feature_type type);
+
+	/*!
+	 * Disable the feature for this device.
+	 *
+	 * @param[in] xdev        The device.
+	 * @param[in] type        The type of device feature.
+	 */
+	xrt_result_t (*end_feature)(struct xrt_device *xdev, enum xrt_device_feature_type type);
+
+	/*!
 	 * Destroy device.
 	 */
 	void (*destroy)(struct xrt_device *xdev);
@@ -517,10 +561,10 @@ struct xrt_device
  *
  * @public @memberof xrt_device
  */
-static inline void
+static inline xrt_result_t
 xrt_device_update_inputs(struct xrt_device *xdev)
 {
-	xdev->update_inputs(xdev);
+	return xdev->update_inputs(xdev);
 }
 
 /*!
@@ -530,13 +574,13 @@ xrt_device_update_inputs(struct xrt_device *xdev)
  *
  * @public @memberof xrt_device
  */
-static inline void
+static inline xrt_result_t
 xrt_device_get_tracked_pose(struct xrt_device *xdev,
                             enum xrt_input_name name,
-                            uint64_t at_timestamp_ns,
+                            int64_t at_timestamp_ns,
                             struct xrt_space_relation *out_relation)
 {
-	xdev->get_tracked_pose(xdev, name, at_timestamp_ns, out_relation);
+	return xdev->get_tracked_pose(xdev, name, at_timestamp_ns, out_relation);
 }
 
 /*!
@@ -549,9 +593,9 @@ xrt_device_get_tracked_pose(struct xrt_device *xdev,
 static inline void
 xrt_device_get_hand_tracking(struct xrt_device *xdev,
                              enum xrt_input_name name,
-                             uint64_t desired_timestamp_ns,
+                             int64_t desired_timestamp_ns,
                              struct xrt_hand_joint_set *out_value,
-                             uint64_t *out_timestamp_ns)
+                             int64_t *out_timestamp_ns)
 {
 	xdev->get_hand_tracking(xdev, name, desired_timestamp_ns, out_value, out_timestamp_ns);
 }
@@ -566,9 +610,10 @@ xrt_device_get_hand_tracking(struct xrt_device *xdev,
 static inline xrt_result_t
 xrt_device_get_face_tracking(struct xrt_device *xdev,
                              enum xrt_input_name facial_expression_type,
+                             int64_t at_timestamp_ns,
                              struct xrt_facial_expression_set *out_value)
 {
-	return xdev->get_face_tracking(xdev, facial_expression_type, out_value);
+	return xdev->get_face_tracking(xdev, facial_expression_type, at_timestamp_ns, out_value);
 }
 
 /*!
@@ -583,9 +628,6 @@ xrt_device_get_body_skeleton(struct xrt_device *xdev,
                              enum xrt_input_name body_tracking_type,
                              struct xrt_body_skeleton *out_value)
 {
-	if (xdev->get_body_skeleton == NULL) {
-		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
-	}
 	return xdev->get_body_skeleton(xdev, body_tracking_type, out_value);
 }
 
@@ -599,12 +641,9 @@ xrt_device_get_body_skeleton(struct xrt_device *xdev,
 static inline xrt_result_t
 xrt_device_get_body_joints(struct xrt_device *xdev,
                            enum xrt_input_name body_tracking_type,
-                           uint64_t desired_timestamp_ns,
+                           int64_t desired_timestamp_ns,
                            struct xrt_body_joint_set *out_value)
 {
-	if (xdev->get_body_joints == NULL) {
-		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
-	}
 	return xdev->get_body_joints(xdev, body_tracking_type, desired_timestamp_ns, out_value);
 }
 
@@ -630,7 +669,7 @@ xrt_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const 
 static inline void
 xrt_device_get_view_poses(struct xrt_device *xdev,
                           const struct xrt_vec3 *default_eye_relation,
-                          uint64_t at_timestamp_ns,
+                          int64_t at_timestamp_ns,
                           uint32_t view_count,
                           struct xrt_space_relation *out_head_relation,
                           struct xrt_fov *out_fovs,
@@ -667,10 +706,6 @@ xrt_device_get_visibility_mask(struct xrt_device *xdev,
                                uint32_t view_index,
                                struct xrt_visibility_mask **out_mask)
 {
-
-	if (xdev->get_visibility_mask == NULL) {
-		return XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED;
-	}
 	return xdev->get_visibility_mask(xdev, type, view_index, out_mask);
 }
 
@@ -701,6 +736,45 @@ static inline bool
 xrt_device_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_factor form_factor)
 {
 	return xdev->is_form_factor_available(xdev, form_factor);
+}
+
+/*!
+ * Helper function for @ref xrt_device::get_battery_status.
+ *
+ * @copydoc xrt_device::get_battery_status
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out_charging, float *out_charge)
+{
+	return xdev->get_battery_status(xdev, out_present, out_charging, out_charge);
+}
+
+/*!
+ * Helper function for @ref xrt_device::begin_feature.
+ *
+ * @copydoc xrt_device::begin_feature
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
+{
+	return xdev->begin_feature(xdev, type);
+}
+
+/*!
+ * Helper function for @ref xrt_device::end_feature.
+ *
+ * @copydoc xrt_device::end_feature
+ *
+ * @public @memberof xrt_device
+ */
+static inline xrt_result_t
+xrt_device_end_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
+{
+	return xdev->end_feature(xdev, type);
 }
 
 /*!

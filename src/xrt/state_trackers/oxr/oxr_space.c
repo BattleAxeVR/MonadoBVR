@@ -72,6 +72,12 @@ get_xrt_space_action(struct oxr_logger *log, struct oxr_space *spc, struct xrt_s
 		if (xret != XRT_SUCCESS) {
 			oxr_warn(log, "Failed to create pose space");
 		} else {
+			struct xrt_system_devices *xsysd = spc->sess->sys->xsysd;
+			if (xdev == xsysd->static_roles.eyes) {
+				// eye tracking is being used
+				xrt_system_devices_feature_inc(xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+			}
+
 			spc->action.xdev = xdev;
 			spc->action.name = name;
 		}
@@ -128,6 +134,12 @@ oxr_space_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 		xrt_space_overseer_ref_space_dec(spc->sess->sys->xso, xtype);
 	}
 
+	struct xrt_system_devices *xsysd = spc->sess->sys->xsysd;
+	if (spc->action.xdev && spc->action.xdev == xsysd->static_roles.eyes) {
+		// eye tracking isn't being used anymore
+		xrt_system_devices_feature_dec(xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+	}
+
 	xrt_space_reference(&spc->xdev_pose.xs, NULL);
 	xrt_space_reference(&spc->action.xs, NULL);
 	spc->action.xdev = NULL;
@@ -174,8 +186,17 @@ oxr_space_get_reference_bounds_rect(struct oxr_logger *log,
 
 	enum xrt_reference_space_type reference_space_type = xr_ref_space_to_xrt(referenceSpaceType);
 
+	if (xc == NULL) {
+		// Headless mode
+		// `bounds` must be set to 0 on XR_SPACE_BOUNDS_UNAVAILABLE
+		*bounds = (XrExtent2Df){0};
+		return XR_SPACE_BOUNDS_UNAVAILABLE;
+	}
+
 	xrt_result_t xret = xrt_comp_get_reference_bounds_rect(xc, reference_space_type, (struct xrt_vec2 *)bounds);
-	if (xret == XRT_ERROR_COMPOSITOR_FUNCTION_NOT_IMPLEMENTED || xret == XRT_SPACE_BOUNDS_UNAVAILABLE) {
+	if (xret == XRT_SPACE_BOUNDS_UNAVAILABLE || xret == XRT_ERROR_NOT_IMPLEMENTED) {
+		// `bounds` must be set to 0 on XR_SPACE_BOUNDS_UNAVAILABLE
+		*bounds = (XrExtent2Df){0};
 		return XR_SPACE_BOUNDS_UNAVAILABLE;
 	}
 	OXR_CHECK_XRET(log, sess, xret, oxr_space_get_reference_bounds_rect);

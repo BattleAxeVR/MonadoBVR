@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,6 +14,7 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
  * @author Moses Turner <moses@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_vk
  */
 
@@ -756,6 +757,7 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 	vk->has_EXT_global_priority = false;
 	vk->has_EXT_image_drm_format_modifier = false;
 	vk->has_EXT_robustness2 = false;
+	vk->has_ANDROID_external_format_resolve = false;
 	vk->has_GOOGLE_display_timing = false;
 
 	const char *const *exts = u_string_list_get_data(ext_list);
@@ -882,6 +884,13 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 			continue;
 		}
 #endif // defined(VK_EXT_robustness2)
+
+#if defined(VK_ANDROID_external_format_resolve)
+		if (strcmp(ext, VK_ANDROID_EXTERNAL_FORMAT_RESOLVE_EXTENSION_NAME) == 0) {
+			vk->has_ANDROID_external_format_resolve = true;
+			continue;
+		}
+#endif // defined(VK_ANDROID_external_format_resolve)
 
 #if defined(VK_GOOGLE_display_timing)
 		if (strcmp(ext, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) == 0) {
@@ -1030,6 +1039,13 @@ filter_device_features(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_ANDROID_external_format_resolve
+	VkPhysicalDeviceExternalFormatResolveFeaturesANDROID ext_fmt_resolve_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FORMAT_RESOLVE_FEATURES_ANDROID,
+	    .pNext = NULL,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures2 physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 	    .pNext = NULL,
@@ -1056,6 +1072,13 @@ filter_device_features(struct vk_bundle *vk,
 	}
 #endif
 
+#ifdef VK_ANDROID_external_format_resolve
+	if (vk->has_ANDROID_external_format_resolve) {
+		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                      (VkBaseInStructure *)&ext_fmt_resolve_info);
+	}
+#endif
+
 	vk->vkGetPhysicalDeviceFeatures2( //
 	    physical_device,              // physicalDevice
 	    &physical_device_features);   // pFeatures
@@ -1077,6 +1100,10 @@ filter_device_features(struct vk_bundle *vk,
 
 #ifdef VK_KHR_synchronization2
 	CHECK(synchronization_2, synchronization_2_info.synchronization2);
+#endif
+
+#ifdef VK_ANDROID_external_format_resolve
+	CHECK(ext_fmt_resolve, ext_fmt_resolve_info.externalFormatResolve);
 #endif
 
 	CHECK(shader_image_gather_extended, physical_device_features.features.shaderImageGatherExtended);
@@ -1243,6 +1270,14 @@ vk_create_device(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_ANDROID_external_format_resolve
+	VkPhysicalDeviceExternalFormatResolveFeaturesANDROID ext_fmt_resolve_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FORMAT_RESOLVE_FEATURES_ANDROID,
+	    .pNext = NULL,
+	    .externalFormatResolve = device_features.ext_fmt_resolve,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures enabled_features = {
 	    .shaderImageGatherExtended = device_features.shader_image_gather_extended,
 	    .shaderStorageImageWriteWithoutFormat = device_features.shader_storage_image_write_without_format,
@@ -1274,6 +1309,13 @@ vk_create_device(struct vk_bundle *vk,
 	if (vk->has_KHR_synchronization2) {
 		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
 		                      (VkBaseInStructure *)&synchronization_2_info);
+	}
+#endif
+
+#ifdef VK_ANDROID_external_format_resolve
+	if (vk->has_ANDROID_external_format_resolve) {
+		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                      (VkBaseInStructure *)&ext_fmt_resolve_info);
 	}
 #endif
 
@@ -1354,6 +1396,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_fence_fd_enabled,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
+                   bool image_format_list_enabled,
                    bool debug_utils_enabled,
                    enum u_logging_level log_level)
 {
@@ -1394,6 +1437,11 @@ vk_init_from_given(struct vk_bundle *vk,
 		vk->has_KHR_external_semaphore_fd = true;
 	}
 
+	// Vulkan does not let us read what extensions was enabled.
+	if (image_format_list_enabled) {
+		vk->has_KHR_image_format_list = image_format_list_enabled;
+	}
+
 #ifdef VK_KHR_timeline_semaphore
 	/*
 	 * Has the timeline semaphore extension and feature been enabled?
@@ -1402,12 +1450,6 @@ vk_init_from_given(struct vk_bundle *vk,
 	if (timeline_semaphore_enabled) {
 		vk->has_KHR_timeline_semaphore = true;
 		vk->features.timeline_semaphore = true;
-	}
-#endif
-
-#ifdef VK_EXT_debug_utils
-	if (debug_utils_enabled) {
-		vk->has_EXT_debug_utils = true;
 	}
 #endif
 
@@ -1425,6 +1467,18 @@ vk_init_from_given(struct vk_bundle *vk,
 
 	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, vk->queue_index, &vk->queue);
 
+	vk->has_EXT_debug_utils = false;
+	if (debug_utils_enabled) {
+#ifdef VK_EXT_debug_utils
+		if (vk->vkSetDebugUtilsObjectNameEXT) {
+			vk->has_EXT_debug_utils = true;
+		} else {
+			VK_WARN(vk, "EXT_debug_utils requested but extension is not loaded");
+		}
+#else
+		VK_WARN(vk, "EXT_debug_utils requested but extension was not available at compile time");
+#endif
+	}
 
 	return VK_SUCCESS;
 

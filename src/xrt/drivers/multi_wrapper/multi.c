@@ -79,10 +79,10 @@ attached_override(struct multi_device *d,
 	m_relation_chain_resolve(&xrc, out_relation);
 }
 
-static void
+static xrt_result_t
 get_tracked_pose(struct xrt_device *xdev,
                  enum xrt_input_name name,
-                 uint64_t at_timestamp_ns,
+                 int64_t at_timestamp_ns,
                  struct xrt_space_relation *out_relation)
 {
 	struct multi_device *d = (struct multi_device *)xdev;
@@ -91,7 +91,11 @@ get_tracked_pose(struct xrt_device *xdev,
 
 	struct xrt_space_relation tracker_relation;
 
-	xrt_device_get_tracked_pose(tracker, tracker_input_name, at_timestamp_ns, &tracker_relation);
+	xrt_result_t xret =
+	    xrt_device_get_tracked_pose(tracker, tracker_input_name, at_timestamp_ns, &tracker_relation);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	switch (d->override_type) {
 	case XRT_TRACKING_OVERRIDE_DIRECT: {
@@ -101,21 +105,25 @@ get_tracked_pose(struct xrt_device *xdev,
 		struct xrt_device *target = d->tracking_override.target;
 
 		struct xrt_space_relation target_relation;
-		xrt_device_get_tracked_pose(target, name, at_timestamp_ns, &target_relation);
-
+		xret = xrt_device_get_tracked_pose(target, name, at_timestamp_ns, &target_relation);
+		if (xret != XRT_SUCCESS) {
+			break;
+		}
 
 		// just use the origin of the tracker space as reference frame
 		struct xrt_space_relation in_target_space;
 		m_space_relation_ident(&in_target_space);
 		in_target_space.relation_flags = tracker_relation.relation_flags;
 
-		struct xrt_pose *target_offset = &d->tracking_override.target->tracking_origin->offset;
-		struct xrt_pose *tracker_offset = &d->tracking_override.tracker->tracking_origin->offset;
+		struct xrt_pose *target_offset = &d->tracking_override.target->tracking_origin->initial_offset;
+		struct xrt_pose *tracker_offset = &d->tracking_override.tracker->tracking_origin->initial_offset;
 
 		attached_override(d, &target_relation, target_offset, &tracker_relation, tracker_offset,
 		                  &in_target_space, out_relation);
 	} break;
 	}
+
+	return xret;
 }
 
 static void
@@ -134,9 +142,9 @@ destroy(struct xrt_device *xdev)
 static void
 get_hand_tracking(struct xrt_device *xdev,
                   enum xrt_input_name name,
-                  uint64_t at_timestamp_ns,
+                  int64_t at_timestamp_ns,
                   struct xrt_hand_joint_set *out_value,
-                  uint64_t *out_timestamp_ns)
+                  int64_t *out_timestamp_ns)
 {
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
@@ -163,8 +171,8 @@ get_hand_tracking(struct xrt_device *xdev,
 		m_space_relation_ident(&in_target_space);
 		in_target_space.relation_flags = tracker_relation.relation_flags;
 
-		struct xrt_pose *target_offset = &d->tracking_override.target->tracking_origin->offset;
-		struct xrt_pose *tracker_offset = &d->tracking_override.tracker->tracking_origin->offset;
+		struct xrt_pose *target_offset = &d->tracking_override.target->tracking_origin->initial_offset;
+		struct xrt_pose *tracker_offset = &d->tracking_override.tracker->tracking_origin->initial_offset;
 
 		attached_override(d, &out_value->hand_pose, target_offset, &tracker_relation, tracker_offset,
 		                  &in_target_space, &out_value->hand_pose);
@@ -183,7 +191,7 @@ set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_o
 static void
 get_view_poses(struct xrt_device *xdev,
                const struct xrt_vec3 *default_eye_relation,
-               uint64_t at_timestamp_ns,
+               int64_t at_timestamp_ns,
                uint32_t view_count,
                struct xrt_space_relation *out_head_relation,
                struct xrt_fov *out_fovs,
@@ -209,12 +217,12 @@ compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, str
 	return target->compute_distortion(target, view, u, v, result);
 }
 
-static void
+static xrt_result_t
 update_inputs(struct xrt_device *xdev)
 {
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
-	xrt_device_update_inputs(target);
+	return xrt_device_update_inputs(target);
 }
 
 

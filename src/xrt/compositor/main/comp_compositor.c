@@ -43,6 +43,7 @@
  */
 
 #include "xrt/xrt_compiler.h"
+#include "xrt/xrt_compositor.h"
 #include "xrt/xrt_config_have.h"
 #include "xrt/xrt_results.h"
 
@@ -82,6 +83,11 @@
 #include <unistd.h>
 #endif
 
+#ifdef XRT_OS_ANDROID
+#include "android/android_custom_surface.h"
+#include "android/android_globals.h"
+#include <dlfcn.h>
+#endif
 
 #define WINDOW_TITLE "Monado"
 
@@ -174,10 +180,10 @@ compositor_end_session(struct xrt_compositor *xc)
 static xrt_result_t
 compositor_predict_frame(struct xrt_compositor *xc,
                          int64_t *out_frame_id,
-                         uint64_t *out_wake_time_ns,
-                         uint64_t *out_predicted_gpu_time_ns,
-                         uint64_t *out_predicted_display_time_ns,
-                         uint64_t *out_predicted_display_period_ns)
+                         int64_t *out_wake_time_ns,
+                         int64_t *out_predicted_gpu_time_ns,
+                         int64_t *out_predicted_display_time_ns,
+                         int64_t *out_predicted_display_period_ns)
 {
 	COMP_TRACE_MARKER();
 
@@ -186,17 +192,17 @@ compositor_predict_frame(struct xrt_compositor *xc,
 	COMP_SPEW(c, "PREDICT_FRAME");
 
 	// A little bit easier to read.
-	uint64_t interval_ns = (int64_t)c->settings.nominal_frame_interval_ns;
+	int64_t interval_ns = (int64_t)c->settings.nominal_frame_interval_ns;
 
 	comp_target_update_timings(c->target);
 
 	assert(comp_frame_is_invalid_locked(&c->frame.waited));
 
 	int64_t frame_id = -1;
-	uint64_t wake_up_time_ns = 0;
-	uint64_t present_slop_ns = 0;
-	uint64_t desired_present_time_ns = 0;
-	uint64_t predicted_display_time_ns = 0;
+	int64_t wake_up_time_ns = 0;
+	int64_t present_slop_ns = 0;
+	int64_t desired_present_time_ns = 0;
+	int64_t predicted_display_time_ns = 0;
 	comp_target_calc_frame_pacing(   //
 	    c->target,                   //
 	    &frame_id,                   //
@@ -223,7 +229,7 @@ static xrt_result_t
 compositor_mark_frame(struct xrt_compositor *xc,
                       int64_t frame_id,
                       enum xrt_compositor_frame_point point,
-                      uint64_t when_ns)
+                      int64_t when_ns)
 {
 	COMP_TRACE_MARKER();
 
@@ -264,20 +270,16 @@ compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 static bool
 can_do_one_projection_layer_fast_path(struct comp_compositor *c)
 {
-	if (c->base.slot.layer_count != 1) {
+	if (c->base.layer_accum.layer_count != 1) {
 		return false;
 	}
 
-	struct comp_layer *layer = &c->base.slot.layers[0];
+	struct comp_layer *layer = &c->base.layer_accum.layers[0];
 	enum xrt_layer_type type = layer->data.type;
 
 	// Handled by the distortion shader.
-	if (type != XRT_LAYER_PROJECTION && //
-	    type != XRT_LAYER_PROJECTION_DEPTH) {
-		return false;
-	}
-
-	return true;
+	return type == XRT_LAYER_PROJECTION || //
+	       type == XRT_LAYER_PROJECTION_DEPTH;
 }
 
 static XRT_CHECK_RESULT xrt_result_t
@@ -298,7 +300,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	    !c->mirroring_to_debug_gui &&             //
 	    !c->debug.disable_fast_path &&            //
 	    can_do_one_projection_layer_fast_path(c); //
-	c->base.slot.one_projection_layer_fast_path = fast_path;
+	c->base.frame_params.one_projection_layer_fast_path = fast_path;
 
 
 	u_graphics_sync_unref(&sync_handle);
@@ -327,10 +329,15 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 static xrt_result_t
 compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
 {
+#ifdef XRT_OS_ANDROID
+	*out_display_refresh_rate_hz =
+	    android_custom_surface_get_display_refresh_rate(android_globals_get_vm(), android_globals_get_context());
+#else
 	struct comp_compositor *c = comp_compositor(xc);
 
 	//! @todo: Implement the method to change display refresh rate.
 	*out_display_refresh_rate_hz = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -338,7 +345,26 @@ compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_displa
 static xrt_result_t
 compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
 {
-	//! @todo: Implement the method to change display refresh rate.
+#ifdef XRT_OS_ANDROID
+	typedef int32_t (*PF_SETFRAMERATE)(ANativeWindow * window, float frameRate, int8_t compatibility);
+
+	// Note that this will just increment the reference count, rather than actually load it again,
+	// since we are linked for other symbols too.
+	void *android_handle = dlopen("libandroid.so", RTLD_NOW);
+	PF_SETFRAMERATE set_frame_rate = (PF_SETFRAMERATE)dlsym(android_handle, "ANativeWindow_setFrameRate");
+	if (!set_frame_rate) {
+		U_LOG_E("ANativeWindow_setFrameRate not found");
+		dlclose(android_handle);
+		return XRT_SUCCESS;
+	}
+	struct ANativeWindow *window = (struct ANativeWindow *)android_globals_get_window();
+	if (window == NULL || (set_frame_rate(window, display_refresh_rate_hz, 1) != 0)) {
+		U_LOG_E("set_frame_rate error");
+	}
+	dlclose(android_handle);
+#else
+	// Currently not implemented on other platforms.
+#endif
 	return XRT_SUCCESS;
 }
 
@@ -497,6 +523,10 @@ static const char *required_device_extensions[] = {
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
     VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+    VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+    VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
     VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -527,7 +557,11 @@ static const char *optional_device_extensions[] = {
     VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,     //
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE) // Not optional
-
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
+#if defined(VK_ANDROID_external_format_resolve)
+    // Requires Vulkan 1.3.268.1
+    VK_ANDROID_EXTERNAL_FORMAT_RESOLVE_EXTENSION_NAME //
+#endif
 #else
 #error "Need port!"
 #endif
@@ -948,16 +982,17 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	struct comp_compositor *c = U_TYPED_CALLOC(struct comp_compositor);
 
-	c->base.base.base.begin_session = compositor_begin_session;
-	c->base.base.base.end_session = compositor_end_session;
-	c->base.base.base.predict_frame = compositor_predict_frame;
-	c->base.base.base.mark_frame = compositor_mark_frame;
-	c->base.base.base.begin_frame = compositor_begin_frame;
-	c->base.base.base.discard_frame = compositor_discard_frame;
-	c->base.base.base.layer_commit = compositor_layer_commit;
-	c->base.base.base.get_display_refresh_rate = compositor_get_display_refresh_rate;
-	c->base.base.base.request_display_refresh_rate = compositor_request_display_refresh_rate;
-	c->base.base.base.destroy = compositor_destroy;
+	struct xrt_compositor *iface = &c->base.base.base;
+	iface->begin_session = compositor_begin_session;
+	iface->end_session = compositor_end_session;
+	iface->predict_frame = compositor_predict_frame;
+	iface->mark_frame = compositor_mark_frame;
+	iface->begin_frame = compositor_begin_frame;
+	iface->discard_frame = compositor_discard_frame;
+	iface->layer_commit = compositor_layer_commit;
+	iface->get_display_refresh_rate = compositor_get_display_refresh_rate;
+	iface->request_display_refresh_rate = compositor_request_display_refresh_rate;
+	iface->destroy = compositor_destroy;
 	c->frame.waited.id = -1;
 	c->frame.rendering.id = -1;
 	c->xdev = xdev;
@@ -1055,7 +1090,7 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	struct xrt_system_compositor_info *sys_info = &sys_info_storage;
 
 	// Required by OpenXR spec.
-	sys_info->max_layers = 16;
+	sys_info->max_layers = XRT_MAX_LAYERS;
 	sys_info->compositor_vk_deviceUUID = c->settings.selected_gpu_deviceUUID;
 	sys_info->client_vk_deviceUUID = c->settings.client_gpu_deviceUUID;
 	sys_info->client_d3d_deviceLUID = c->settings.client_gpu_deviceLUID;
@@ -1101,14 +1136,33 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	// Only add active views.
 	for (uint32_t i = 0; i < view_count; i++) {
-		char tmp[] = "View[X_XXX_XXX]";
+		char tmp[64] = {0};
 		snprintf(tmp, sizeof(tmp), "View[%u]", i);
 		u_var_add_native_images_debug(c, &c->scratch.views[i].unid, tmp);
 	}
 
+#ifdef XRT_OS_ANDROID
+	// Get info about display.
+	struct xrt_android_display_metrics metrics;
+	if (!android_custom_surface_get_display_metrics(android_globals_get_vm(), android_globals_get_context(),
+	                                                &metrics)) {
+		U_LOG_E("Could not get Android display metrics.");
+		/* Fallback to default values */
+		metrics.refresh_rates[0] = 60.0f;
+		metrics.refresh_rate_count = 1;
+		metrics.refresh_rate = metrics.refresh_rates[0];
+	}
+
+	// Copy data to info.
+	sys_info->refresh_rate_count = metrics.refresh_rate_count;
+	for (size_t i = 0; i < sys_info->refresh_rate_count; ++i) {
+		sys_info->refresh_rates_hz[i] = metrics.refresh_rates[i];
+	}
+#else
 	//! @todo: Query all supported refresh rates of the current mode
 	sys_info->refresh_rate_count = 1;
 	sys_info->refresh_rates_hz[0] = (float)(1. / time_ns_to_s(c->settings.nominal_frame_interval_ns));
+#endif // XRT_OS_ANDROID
 
 	// Needs to be delayed until after compositor's u_var has been setup.
 	if (!c->deferred_surface) {

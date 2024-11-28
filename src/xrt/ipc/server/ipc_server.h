@@ -12,8 +12,9 @@
 #pragma once
 
 #include "xrt/xrt_compiler.h"
-#include "xrt/xrt_system.h"
+#include "xrt/xrt_limits.h"
 #include "xrt/xrt_space.h"
+#include "xrt/xrt_system.h"
 
 #include "os/os_threading.h"
 
@@ -49,7 +50,7 @@ extern "C" {
  */
 
 #define IPC_MAX_CLIENT_SEMAPHORES 8
-#define IPC_MAX_CLIENT_SWAPCHAINS 32
+#define IPC_MAX_CLIENT_SWAPCHAINS (XRT_MAX_LAYERS * 2)
 #define IPC_MAX_CLIENT_SPACES 128
 
 struct xrt_instance;
@@ -116,12 +117,23 @@ struct ipc_client_state
 
 	//! Number of spaces.
 	uint32_t space_count;
+	//! Index of localspace in ipc client.
+	uint32_t local_space_index;
+	//! Index of localspace in space overseer.
+	uint32_t local_space_overseer_index;
+	//! Index of localfloorspace in ipc client.
+	uint32_t local_floor_space_index;
+	//! Index of localfloorspace in space overseer.
+	uint32_t local_floor_space_overseer_index;
 
 	//! Ptrs to the spaces.
 	struct xrt_space *xspcs[IPC_MAX_CLIENT_SPACES];
 
 	//! Which of the references spaces is the client using.
 	bool ref_space_used[XRT_SPACE_REFERENCE_TYPE_COUNT];
+
+	//! Which of the device features is the client using.
+	bool device_feature_used[XRT_DEVICE_FEATURE_MAX_ENUM];
 
 	//! Socket fd used for client comms
 	struct ipc_message_channel imc;

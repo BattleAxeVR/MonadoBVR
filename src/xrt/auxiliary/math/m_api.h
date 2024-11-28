@@ -223,6 +223,14 @@ void
 math_quat_from_euler_angles(const struct xrt_vec3 *angles, struct xrt_quat *result);
 
 /*!
+ * Create a rotation from a quaternion to euler angles
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_to_euler_angles(const struct xrt_quat *quat, struct xrt_vec3 *euler_angles);
+
+/*!
  * Create a rotation from a 3x3 rotation (row major) matrix.
  *
  * @relates xrt_quat
@@ -244,6 +252,17 @@ math_quat_from_matrix_3x3(const struct xrt_matrix_3x3 *mat, struct xrt_quat *res
  */
 void
 math_quat_from_plus_x_z(const struct xrt_vec3 *plus_x, const struct xrt_vec3 *plus_z, struct xrt_quat *result);
+
+/*!
+ * Create a rotation from two vectors vec_a and vec_b that would
+ * rotate vec_a into vec_b
+ *
+ * @relates xrt_quat
+ * @see xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_quat_from_vec_a_to_vec_b(const struct xrt_vec3 *vec_a, const struct xrt_vec3 *vec_b, struct xrt_quat *result);
 
 /*!
  * Check if this quat can be used in transformation operations.
@@ -280,6 +299,20 @@ math_quat_invert(const struct xrt_quat *quat, struct xrt_quat *out_quat);
  */
 float
 math_quat_len(const struct xrt_quat *quat);
+
+/*!
+ * The dot product of 2 quaternions. It has a analogous interpretation
+ * as for vec3. For unit quaternions, it provides cos(theta) of the
+ * angle between the 2 quaternion rotations.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+static inline float
+math_quat_dot(const struct xrt_quat *l, const struct xrt_quat *r)
+{
+	return l->x * r->x + l->y * r->y + l->z * r->z + l->w * r->w;
+}
 
 /*!
  * Normalize a quaternion.
@@ -437,6 +470,25 @@ math_quat_from_swing_twist(const struct xrt_vec2 *swing, const float twist, stru
  */
 void
 math_quat_to_swing_twist(const struct xrt_quat *in, struct xrt_vec2 *out_swing, float *out_twist);
+
+/*!
+ * Decompose a quaternion to swing and twist component rotations around a target
+ * axis. The swing is always orthogonal to the target axis, and twist rotation is always
+ * around the axis.
+ *
+ * swing * twist gives back the original quat
+ * (e.g. math_quat_rotate(&swing, &twist, &orig_q))
+ *
+ * See https://arxiv.org/pdf/1506.05481.pdf
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+void
+math_quat_decompose_swing_twist(const struct xrt_quat *in,
+                                const struct xrt_vec3 *twist_axis,
+                                struct xrt_quat *swing,
+                                struct xrt_quat *twist);
 
 /*
  *

@@ -54,7 +54,8 @@ android_sensor_callback(int fd, int events, void *data)
 			accel.y = -event.acceleration.x;
 			accel.z = event.acceleration.z;
 
-			ANDROID_TRACE(d, "accel %ld %.2f %.2f %.2f", event.timestamp, accel.x, accel.y, accel.z);
+			ANDROID_TRACE(d, "accel %" PRId64 " %.2f %.2f %.2f", event.timestamp, accel.x, accel.y,
+			              accel.z);
 			break;
 		}
 		case ASENSOR_TYPE_GYROSCOPE: {
@@ -62,7 +63,7 @@ android_sensor_callback(int fd, int events, void *data)
 			gyro.y = event.data[0];
 			gyro.z = event.data[2];
 
-			ANDROID_TRACE(d, "gyro %ld %.2f %.2f %.2f", event.timestamp, gyro.x, gyro.y, gyro.z);
+			ANDROID_TRACE(d, "gyro %" PRId64 " %.2f %.2f %.2f", event.timestamp, gyro.x, gyro.y, gyro.z);
 
 			// TODO: Make filter handle accelerometer
 			struct xrt_vec3 null_accel;
@@ -169,10 +170,10 @@ android_device_destroy(struct xrt_device *xdev)
 	free(android);
 }
 
-static void
+static xrt_result_t
 android_device_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
-                                uint64_t at_timestamp_ns,
+                                int64_t at_timestamp_ns,
                                 struct xrt_space_relation *out_relation)
 {
 	(void)at_timestamp_ns;
@@ -188,6 +189,7 @@ android_device_get_tracked_pose(struct xrt_device *xdev,
 	                                                              XRT_SPACE_RELATION_POSITION_VALID_BIT);
 
 	*out_relation = new_relation;
+	return XRT_SUCCESS;
 }
 
 

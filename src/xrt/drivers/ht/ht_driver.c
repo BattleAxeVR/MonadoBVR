@@ -148,9 +148,9 @@ userConfigSetDefaults(struct ht_device *htd)
 static void
 ht_device_get_hand_tracking(struct xrt_device *xdev,
                             enum xrt_input_name name,
-                            uint64_t at_timestamp_ns,
+                            int64_t at_timestamp_ns,
                             struct xrt_hand_joint_set *out_value,
-                            uint64_t *out_timestamp_ns)
+                            int64_t *out_timestamp_ns)
 {
 	struct ht_device *htd = ht_device(xdev);
 
@@ -203,10 +203,6 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 	}
 
 	htd->base.tracking_origin->type = XRT_TRACKING_TYPE_RGB;
-	htd->base.tracking_origin->offset.position.x = 0.0f;
-	htd->base.tracking_origin->offset.position.y = 0.0f;
-	htd->base.tracking_origin->offset.position.z = 0.0f;
-	htd->base.tracking_origin->offset.orientation.w = 1.0f;
 
 	htd->base.update_inputs = u_device_noop_update_inputs;
 	htd->base.get_hand_tracking = ht_device_get_hand_tracking;

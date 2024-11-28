@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
 #include <assert.h>
 
 #include "xrt/xrt_device.h"
@@ -317,6 +316,36 @@ oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
 	}
 }
 
+void
+oxr_system_get_face_tracking2_fb_support(struct oxr_logger *log,
+                                         struct oxr_instance *inst,
+                                         bool *supports_audio,
+                                         bool *supports_visual)
+{
+	if (supports_audio != NULL)
+		*supports_audio = false;
+
+	if (supports_visual != NULL)
+		*supports_visual = false;
+
+	struct oxr_system *sys = &inst->system;
+	struct xrt_device *face_xdev = GET_XDEV_BY_ROLE(sys, face);
+
+	if (face_xdev == NULL || !face_xdev->face_tracking_supported || face_xdev->inputs == NULL) {
+		return;
+	}
+
+	for (size_t input_idx = 0; input_idx < face_xdev->input_count; ++input_idx) {
+		const struct xrt_input *input = &face_xdev->inputs[input_idx];
+		if (input->name == XRT_INPUT_FB_FACE_TRACKING2_AUDIO && supports_audio != NULL) {
+			*supports_audio = true;
+		} else if (input->name == XRT_INPUT_FB_FACE_TRACKING2_VISUAL && supports_visual != NULL) {
+			*supports_visual = true;
+		}
+	}
+	return;
+}
+
 static bool
 oxr_system_get_body_tracking_support(struct oxr_logger *log,
                                      struct oxr_instance *inst,
@@ -359,13 +388,14 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		properties->graphicsProperties.maxLayerCount = info->max_layers;
 	} else {
 		// probably using the headless extension, but the extension does not modify the 16 layer minimum.
-		properties->graphicsProperties.maxLayerCount = 16;
+		properties->graphicsProperties.maxLayerCount = XRT_MAX_LAYERS;
 	}
 	properties->graphicsProperties.maxSwapchainImageWidth = 1024 * 16;
 	properties->graphicsProperties.maxSwapchainImageHeight = 1024 * 16;
 	properties->trackingProperties.orientationTracking = xdev->orientation_tracking_supported;
 	properties->trackingProperties.positionTracking = xdev->position_tracking_supported;
 
+#ifdef OXR_HAVE_EXT_hand_tracking
 	XrSystemHandTrackingPropertiesEXT *hand_tracking_props = NULL;
 	// We should only be looking for extension structs if the extension has been enabled.
 	if (sys->inst->extensions.EXT_hand_tracking) {
@@ -376,6 +406,7 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	if (hand_tracking_props) {
 		hand_tracking_props->supportsHandTracking = oxr_system_get_hand_tracking_support(log, sys->inst);
 	}
+#endif
 
 #ifdef OXR_HAVE_EXT_eye_gaze_interaction
 	XrSystemEyeGazeInteractionPropertiesEXT *eye_gaze_props = NULL;
@@ -448,6 +479,21 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		body_tracking_fb_props->supportsBodyTracking = oxr_system_get_body_tracking_fb_support(log, sys->inst);
 	}
 #endif // OXR_HAVE_FB_body_tracking
+
+#ifdef OXR_HAVE_FB_face_tracking2
+	XrSystemFaceTrackingProperties2FB *face_tracking2_fb_props = NULL;
+	if (sys->inst->extensions.FB_face_tracking2) {
+		face_tracking2_fb_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES2_FB, XrSystemFaceTrackingProperties2FB);
+	}
+
+	if (face_tracking2_fb_props) {
+		bool supports_audio, supports_visual;
+		oxr_system_get_face_tracking2_fb_support(log, sys->inst, &supports_audio, &supports_visual);
+		face_tracking2_fb_props->supportsAudioFaceTracking = supports_audio;
+		face_tracking2_fb_props->supportsVisualFaceTracking = supports_visual;
+	}
+#endif // OXR_HAVE_FB_face_tracking2
 
 
 #ifdef OXR_HAVE_MNDX_xdev_space

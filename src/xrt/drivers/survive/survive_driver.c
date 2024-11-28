@@ -15,7 +15,6 @@
 #include <string.h>
 #include <assert.h>
 #include <string.h>
-#include <inttypes.h>
 
 #include "math/m_api.h"
 #include "math/m_space.h"
@@ -316,7 +315,7 @@ verify_device_name(struct survive_device *survive, enum xrt_input_name name)
 {
 
 	switch (survive->device_type) {
-	case DEVICE_TYPE_HMD: return name == XRT_INPUT_GENERIC_HEAD_POSE || name == XRT_INPUT_GENERIC_STAGE_SPACE_POSE;
+	case DEVICE_TYPE_HMD: return name == XRT_INPUT_GENERIC_HEAD_POSE;
 	case DEVICE_TYPE_CONTROLLER:
 		return name == XRT_INPUT_INDEX_AIM_POSE || name == XRT_INPUT_INDEX_GRIP_POSE ||
 		       name == XRT_INPUT_VIVE_AIM_POSE || name == XRT_INPUT_VIVE_GRIP_POSE ||
@@ -325,28 +324,21 @@ verify_device_name(struct survive_device *survive, enum xrt_input_name name)
 	return false;
 }
 
-static void
+static xrt_result_t
 survive_device_get_tracked_pose(struct xrt_device *xdev,
                                 enum xrt_input_name name,
-                                uint64_t at_timestamp_ns,
+                                int64_t at_timestamp_ns,
                                 struct xrt_space_relation *out_relation)
 {
 	struct survive_device *survive = (struct survive_device *)xdev;
 	if (!verify_device_name(survive, name)) {
-		SURVIVE_ERROR(survive, "unknown input name");
-		return;
-	}
-
-	if (name == XRT_INPUT_GENERIC_STAGE_SPACE_POSE) {
-		// STAGE is implicitly defined as the space poses are returned in, therefore STAGE origin is (0, 0, 0).
-		*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
-		out_relation->relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&survive->base, survive->sys->log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	if (!survive->survive_obj) {
 		// U_LOG_D("Obj not set for %p", (void*)survive);
-		return;
+		return XRT_SUCCESS;
 	}
 
 	// We're pretty sure libsurvive is giving us the IMU pose here, so this works.
@@ -364,6 +356,24 @@ survive_device_get_tracked_pose(struct xrt_device *xdev,
 	struct xrt_pose *p = &out_relation->pose;
 	SURVIVE_TRACE(survive, "GET_POSITION (%f %f %f) GET_ORIENTATION (%f, %f, %f, %f)", p->position.x, p->position.y,
 	              p->position.z, p->orientation.x, p->orientation.y, p->orientation.z, p->orientation.w);
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+survive_device_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out_charging, float *out_charge)
+{
+	struct survive_device *survive = (struct survive_device *)xdev;
+	if (!survive->survive_obj) {
+		// U_LOG_D("Obj not set for %p", (void*)survive);
+		*out_present = false;
+		return XRT_SUCCESS;
+	}
+
+	*out_present = true;
+	*out_charging = survive_simple_object_charging(survive->survive_obj);
+	*out_charge = survive_simple_object_charge_percet(survive->survive_obj) * 0.01F;
+	SURVIVE_TRACE(survive, "Charging: %s, charge: %f", *out_charging ? "true" : "false", *out_charge);
+	return XRT_SUCCESS;
 }
 
 static int
@@ -449,9 +459,9 @@ struct Button buttons[255] = {
 static void
 survive_controller_get_hand_tracking(struct xrt_device *xdev,
                                      enum xrt_input_name name,
-                                     uint64_t at_timestamp_ns,
+                                     int64_t at_timestamp_ns,
                                      struct xrt_hand_joint_set *out_value,
-                                     uint64_t *out_timestamp_ns)
+                                     int64_t *out_timestamp_ns)
 {
 	struct survive_device *survive = (struct survive_device *)xdev;
 
@@ -514,7 +524,7 @@ survive_controller_get_hand_tracking(struct xrt_device *xdev,
 static void
 survive_device_get_view_poses(struct xrt_device *xdev,
                               const struct xrt_vec3 *default_eye_relation,
-                              uint64_t at_timestamp_ns,
+                              int64_t at_timestamp_ns,
                               uint32_t view_count,
                               struct xrt_space_relation *out_head_relation,
                               struct xrt_fov *out_fovs,
@@ -865,7 +875,7 @@ _process_event(struct survive_system *ss, struct SurviveSimpleEvent *event)
 	}
 }
 
-static void
+static xrt_result_t
 survive_device_update_inputs(struct xrt_device *xdev)
 {
 	struct survive_device *survive = (struct survive_device *)xdev;
@@ -877,6 +887,8 @@ survive_device_update_inputs(struct xrt_device *xdev)
 	}
 
 	os_mutex_unlock(&survive->sys->lock);
+
+	return XRT_SUCCESS;
 }
 
 static bool
@@ -973,11 +985,12 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	survive->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
 	survive->base.compute_distortion = compute_distortion;
+	survive->base.get_battery_status = survive_device_get_battery_status;
 
 	survive->base.orientation_tracking_supported = true;
 	survive->base.position_tracking_supported = true;
 	survive->base.device_type = XRT_DEVICE_TYPE_HMD;
-	survive->base.stage_supported = true;
+	survive->base.battery_status_supported = true;
 
 	survive->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 
@@ -1083,6 +1096,7 @@ _create_controller_device(struct survive_system *sys,
 	survive->base.update_inputs = survive_device_update_inputs;
 	survive->base.get_tracked_pose = survive_device_get_tracked_pose;
 	survive->base.set_output = survive_controller_device_set_output;
+	survive->base.get_battery_status = survive_device_get_battery_status;
 	snprintf(survive->base.serial, XRT_DEVICE_NAME_LEN, "%s", survive->ctrl.config.firmware.device_serial_number);
 
 	if (variant == CONTROLLER_INDEX_LEFT || variant == CONTROLLER_INDEX_RIGHT) {
@@ -1176,6 +1190,7 @@ _create_controller_device(struct survive_system *sys,
 
 	survive->base.orientation_tracking_supported = true;
 	survive->base.position_tracking_supported = true;
+	survive->base.battery_status_supported = true;
 
 	survive->last_inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, survive->base.input_count);
 	survive->num_last_inputs = survive->base.input_count;
@@ -1344,10 +1359,10 @@ survive_get_devices(struct xrt_device **out_xdevs, struct vive_config **out_vive
 	ss->ctx = actx;
 	ss->base.type = XRT_TRACKING_TYPE_LIGHTHOUSE;
 	snprintf(ss->base.name, XRT_TRACKING_NAME_LEN, "%s", "Libsurvive Tracking");
-	ss->base.offset.position.x = 0.0f;
-	ss->base.offset.position.y = 0.0f;
-	ss->base.offset.position.z = 0.0f;
-	ss->base.offset.orientation.w = 1.0f;
+	ss->base.initial_offset.position.x = 0.0f;
+	ss->base.initial_offset.position.y = 0.0f;
+	ss->base.initial_offset.position.z = 0.0f;
+	ss->base.initial_offset.orientation.w = 1.0f;
 	ss->timecode_offset_ms = (struct u_var_draggable_f32){
 	    .val = debug_get_float_option_survive_timecode_offset_ms(),
 	    .min = -20.0,

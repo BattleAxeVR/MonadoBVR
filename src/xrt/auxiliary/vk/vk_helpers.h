@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,6 +14,7 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
  * @author Moses Turner <moses@collabora.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup aux_vk
  */
 
@@ -142,6 +143,7 @@ struct vk_bundle
 	bool has_EXT_global_priority;
 	bool has_EXT_image_drm_format_modifier;
 	bool has_EXT_robustness2;
+	bool has_ANDROID_external_format_resolve;
 	bool has_GOOGLE_display_timing;
 	// end of GENERATED device extension code - do not modify - used by scripts
 
@@ -193,8 +195,8 @@ struct vk_bundle
 
 	PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
 	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
-	PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2;
-	PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2;
+	PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2;
+	PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2;
 	PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
 	PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -203,7 +205,7 @@ struct vk_bundle
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties;
 	PFN_vkGetPhysicalDeviceFormatProperties2KHR vkGetPhysicalDeviceFormatProperties2;
-	PFN_vkGetPhysicalDeviceImageFormatProperties2 vkGetPhysicalDeviceImageFormatProperties2;
+	PFN_vkGetPhysicalDeviceImageFormatProperties2KHR vkGetPhysicalDeviceImageFormatProperties2;
 	PFN_vkGetPhysicalDeviceExternalBufferPropertiesKHR vkGetPhysicalDeviceExternalBufferPropertiesKHR;
 	PFN_vkGetPhysicalDeviceExternalFencePropertiesKHR vkGetPhysicalDeviceExternalFencePropertiesKHR;
 	PFN_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR vkGetPhysicalDeviceExternalSemaphorePropertiesKHR;
@@ -658,8 +660,8 @@ vk_name_object(struct vk_bundle *vk, VkObjectType type, uint64_t object, const c
 #define VK_NAME_OBJ(VK, TYPE, SUFFIX, OBJ, NAME)                                                                       \
 	do {                                                                                                           \
 		if ((VK)->has_EXT_debug_utils) {                                                                       \
-			TYPE _thing = OBJ;                                                                             \
-			vk_name_object(VK, VK_OBJECT_TYPE_##SUFFIX, (uint64_t)_thing, NAME);                           \
+			XRT_MAYBE_UNUSED TYPE _thing = (TYPE)(OBJ);                                                    \
+			vk_name_object(VK, VK_OBJECT_TYPE_##SUFFIX, (uint64_t)OBJ, NAME);                              \
 		}                                                                                                      \
 	} while (false)
 
@@ -687,17 +689,19 @@ vk_name_object(struct vk_bundle *vk, VkObjectType type, uint64_t object, const c
  */
 #define VK_NAME_OBJ_DISABLED(VK, TYPE, OBJ)                                                                            \
 	do {                                                                                                           \
-		XRT_MAYBE_UNUSED TYPE _thing = OBJ;                                                                    \
+		XRT_MAYBE_UNUSED TYPE _thing = (TYPE)(OBJ);                                                            \
 	} while (false)
 
 
 // clang-format off
-#define VK_NAME_INSTANCE(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkInstance, OBJ)
-#define VK_NAME_PHYSICAL_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPhysicalDevice, PHYSICAL_DEVICE, OBJ, NAME)
-#define VK_NAME_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDevice, DEVICE, OBJ, NAME)
-#define VK_NAME_QUEUE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkQueue, QUEUE, OBJ, NAME)
+// VK_DEFINE_HANDLE types are always pointers
+#define VK_NAME_INSTANCE(VK, OBJ, NAME) VK_NAME_OBJ_DISABLED(VK, VkInstance, (uintptr_t)OBJ)
+#define VK_NAME_PHYSICAL_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkPhysicalDevice, PHYSICAL_DEVICE, (uintptr_t)OBJ, NAME)
+#define VK_NAME_DEVICE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDevice, DEVICE, (uintptr_t)OBJ, NAME)
+#define VK_NAME_QUEUE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkQueue, QUEUE, (uintptr_t)OBJ, NAME)
+#define VK_NAME_COMMAND_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkCommandBuffer, COMMAND_BUFFER, (uintptr_t)OBJ, NAME)
+// VK_DEFINE_NON_DISPATCHABLE_HANDLE types are pointers in 64-bits and uint64_t in 32-bits
 #define VK_NAME_SEMAPHORE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkSemaphore, SEMAPHORE, OBJ, NAME)
-#define VK_NAME_COMMAND_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkCommandBuffer, COMMAND_BUFFER, OBJ, NAME)
 #define VK_NAME_FENCE(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkFence, FENCE, OBJ, NAME)
 #define VK_NAME_DEVICE_MEMORY(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkDeviceMemory, DEVICE_MEMORY, OBJ, NAME)
 #define VK_NAME_BUFFER(VK, OBJ, NAME) VK_NAME_OBJ(VK, VkBuffer, BUFFER, OBJ, NAME)
@@ -994,6 +998,7 @@ struct vk_device_features
 	bool null_descriptor;
 	bool timeline_semaphore;
 	bool synchronization_2;
+	bool ext_fmt_resolve;
 };
 
 /*!
@@ -1045,6 +1050,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_fence_fd_enabled,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
+                   bool image_format_list_enabled,
                    bool debug_utils_enabled,
                    enum u_logging_level log_level);
 
@@ -1078,9 +1084,7 @@ vk_get_memory_type(struct vk_bundle *vk, uint32_t type_bits, VkMemoryPropertyFla
  *
  * @param vk Vulkan bundle
  * @param image The VkImage to allocate for and bind.
- * @param max_size The maximum value you'll allow for
- *        VkMemoryRequirements::size. Pass SIZE_MAX if you will accept any size
- *        that works.
+ * @param requirements Memory requirements used for finding the memory type and the size.
  * @param pNext_for_allocate (Optional) a pointer to use in the pNext chain of
  *        VkMemoryAllocateInfo.
  * @param caller_name Used for error printing, this function is called from
@@ -1100,11 +1104,10 @@ vk_get_memory_type(struct vk_bundle *vk, uint32_t type_bits, VkMemoryPropertyFla
 XRT_CHECK_RESULT VkResult
 vk_alloc_and_bind_image_memory(struct vk_bundle *vk,
                                VkImage image,
-                               size_t max_size,
+                               const VkMemoryRequirements *requirements,
                                const void *pNext_for_allocate,
                                const char *caller_name,
-                               VkDeviceMemory *out_mem,
-                               VkDeviceSize *out_size);
+                               VkDeviceMemory *out_mem);
 
 /*!
  *
@@ -1554,6 +1557,13 @@ vk_csci_get_image_external_support(struct vk_bundle *vk,
                                    bool *out_importable,
                                    bool *out_exportable);
 
+/*!
+ * Verify if a format is supported for a specific usage
+ *
+ * CSCI = Compositor SwapChain Images.
+ */
+bool
+vk_csci_is_format_supported(struct vk_bundle *vk, VkFormat format, enum xrt_swapchain_usage_bits xbits);
 
 /*
  *

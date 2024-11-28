@@ -1,4 +1,4 @@
-// Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2020-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -51,7 +51,6 @@
 #endif
 
 #ifdef XRT_OS_ANDROID
-#include "android/android_globals.h"
 #include "android/ipc_client_android.h"
 #endif // XRT_OS_ANDROID
 
@@ -60,9 +59,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(ipc_ignore_version, "IPC_IGNORE_VERSION", false)
 #ifdef XRT_OS_ANDROID
 
 static bool
-ipc_client_socket_connect(struct ipc_connection *ipc_c)
+ipc_client_socket_connect(struct ipc_connection *ipc_c, struct _JavaVM *vm, void *context)
 {
-	ipc_c->ica = ipc_client_android_create(android_globals_get_vm(), android_globals_get_activity());
+	ipc_c->ica = ipc_client_android_create(vm, context);
 
 	if (ipc_c->ica == NULL) {
 		IPC_ERROR(ipc_c, "Client create error!");
@@ -308,7 +307,7 @@ ipc_client_check_git_tag(struct ipc_connection *ipc_c)
 }
 
 static xrt_result_t
-ipc_client_describe_client(struct ipc_connection *ipc_c, const struct xrt_instance_info *i_info)
+ipc_client_describe_client(struct ipc_connection *ipc_c, const struct xrt_application_info *a_info)
 {
 #ifdef XRT_OS_WINDOWS
 	DWORD pid = GetCurrentProcessId();
@@ -317,7 +316,7 @@ ipc_client_describe_client(struct ipc_connection *ipc_c, const struct xrt_instan
 #endif
 
 	struct ipc_client_description desc = {0};
-	desc.info = *i_info;
+	desc.info = *a_info;
 	desc.pid = pid; // Extra info.
 
 	xrt_result_t xret = ipc_call_instance_describe_client(ipc_c, &desc);
@@ -356,7 +355,14 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 	}
 
 	// Connect the service.
+#ifdef XRT_OS_ANDROID
+	struct _JavaVM *vm = i_info->platform_info.vm;
+	void *context = i_info->platform_info.context;
+
+	if (!ipc_client_socket_connect(ipc_c, vm, context)) {
+#else
 	if (!ipc_client_socket_connect(ipc_c)) {
+#endif
 		IPC_ERROR(ipc_c,
 		          "Failed to connect to monado service process\n\n"
 		          "###\n"
@@ -385,7 +391,7 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 	}
 
 	// Do this last.
-	xret = ipc_client_describe_client(ipc_c, i_info);
+	xret = ipc_client_describe_client(ipc_c, &i_info->app_info);
 	if (xret != XRT_SUCCESS) {
 		goto err_fini; // Already logged.
 	}

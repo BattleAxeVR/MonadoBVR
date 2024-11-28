@@ -20,12 +20,12 @@
 
 #include <stdio.h>
 #include <assert.h>
-#include <inttypes.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(log_level, "U_PACING_APP_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_FLOAT_OPTION(min_app_time_ms, "U_PACING_APP_MIN_TIME_MS", 1.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(min_margin_ms, "U_PACING_APP_MIN_MARGIN_MS", 2.0f)
 DEBUG_GET_ONCE_BOOL_OPTION(use_min_frame_period, "U_PACING_APP_USE_MIN_FRAME_PERIOD", false)
+DEBUG_GET_ONCE_BOOL_OPTION(immediate_wait_frame_return, "U_PACING_APP_IMMEDIATE_WAIT_FRAME_RETURN", false)
 
 #define UPA_LOG_T(...) U_LOG_IFL_T(debug_get_log_option_log_level(), __VA_ARGS__)
 #define UPA_LOG_D(...) U_LOG_IFL_D(debug_get_log_option_log_level(), __VA_ARGS__)
@@ -69,34 +69,34 @@ struct u_pa_frame
 	int64_t frame_id;
 
 	//! How long we thought the frame would take.
-	uint64_t predicted_frame_time_ns;
+	int64_t predicted_frame_time_ns;
 
 	//! When we predicted the app should wake up.
-	uint64_t predicted_wake_up_time_ns;
+	int64_t predicted_wake_up_time_ns;
 
 	//! When the client's GPU work should have completed.
-	uint64_t predicted_gpu_done_time_ns;
+	int64_t predicted_gpu_done_time_ns;
 
 	//! When we predicted this frame to be shown.
-	uint64_t predicted_display_time_ns;
+	int64_t predicted_display_time_ns;
 
 	//! The selected display period.
-	uint64_t predicted_display_period_ns;
+	int64_t predicted_display_period_ns;
 
 	/*!
 	 * When the app told us to display this frame, can be different
 	 * then the predicted display time so we track that separately.
 	 */
-	uint64_t display_time_ns;
+	int64_t display_time_ns;
 
 	//! When something happened.
 	struct
 	{
-		uint64_t predicted_ns;
-		uint64_t wait_woke_ns;
-		uint64_t begin_ns;
-		uint64_t delivered_ns;
-		uint64_t gpu_done_ns;
+		int64_t predicted_ns;
+		int64_t wait_woke_ns;
+		int64_t begin_ns;
+		int64_t delivered_ns;
+		int64_t gpu_done_ns;
 	} when;
 
 	enum u_pa_state state;
@@ -141,24 +141,24 @@ struct pacing_app
 	struct
 	{
 		//! App time between wait returning and begin being called.
-		uint64_t cpu_time_ns;
+		int64_t cpu_time_ns;
 		//! Time between begin and frame data being delivered.
-		uint64_t draw_time_ns;
+		int64_t draw_time_ns;
 		//! Time between the frame data being delivered and GPU completing.
-		uint64_t gpu_time_ns;
+		int64_t gpu_time_ns;
 	} app; //!< App statistics.
 
 	struct
 	{
 		//! The last display time that the thing driving this helper got.
-		uint64_t predicted_display_time_ns;
+		int64_t predicted_display_time_ns;
 		//! The last display period the hardware is running at.
-		uint64_t predicted_display_period_ns;
+		int64_t predicted_display_period_ns;
 		//! The extra time needed by the thing driving this helper.
-		uint64_t extra_ns;
+		int64_t extra_ns;
 	} last_input;
 
-	uint64_t last_returned_ns;
+	int64_t last_returned_ns;
 };
 
 
@@ -205,56 +205,56 @@ point_to_str(enum u_timing_point point)
 #define DEBUG_PRINT_ID_FRAME_POINT(ID, F, P)                                                                           \
 	UPA_LOG_T("%" PRIi64 " (%" PRIi64 ", %s) %s", frame_id, F->frame_id, state_to_str(F->state), point_to_str(P));
 
-#define GET_INDEX_FROM_ID(RT, ID) ((uint64_t)(ID) % FRAME_COUNT)
+#define GET_INDEX_FROM_ID(RT, ID) ((int64_t)(ID) % FRAME_COUNT)
 
 #define IIR_ALPHA_LT 0.8
 #define IIR_ALPHA_GT 0.8
 
 static void
-do_iir_filter(uint64_t *target, double alpha_lt, double alpha_gt, uint64_t sample)
+do_iir_filter(int64_t *target, double alpha_lt, double alpha_gt, int64_t sample)
 {
-	uint64_t t = *target;
+	int64_t t = *target;
 	double alpha = t < sample ? alpha_lt : alpha_gt;
 	double a = time_ns_to_s(t) * alpha;
 	double b = time_ns_to_s(sample) * (1.0 - alpha);
 	*target = time_s_to_ns(a + b);
 }
 
-static uint64_t
+static int64_t
 min_period(const struct pacing_app *pa)
 {
 	return pa->last_input.predicted_display_period_ns;
 }
 
-static uint64_t
+static int64_t
 min_app_time(const struct pacing_app *pa)
 {
-	return (uint64_t)(pa->min_app_time_ms.val * (double)U_TIME_1MS_IN_NS);
+	return (int64_t)(pa->min_app_time_ms.val * (double)U_TIME_1MS_IN_NS);
 }
 
-static uint64_t
+static int64_t
 margin_time(const struct pacing_app *pa)
 {
-	return (uint64_t)(pa->min_margin_ms.val * (double)U_TIME_1MS_IN_NS);
+	return (int64_t)(pa->min_margin_ms.val * (double)U_TIME_1MS_IN_NS);
 }
 
-static uint64_t
+static int64_t
 last_sample_displayed(const struct pacing_app *pa)
 {
 	return pa->last_input.predicted_display_time_ns;
 }
 
-static uint64_t
+static int64_t
 last_return_predicted_display(const struct pacing_app *pa)
 {
 	return pa->last_returned_ns;
 }
 
-static uint64_t
+static int64_t
 total_app_time_ns(const struct pacing_app *pa)
 {
-	uint64_t total_ns = pa->app.cpu_time_ns + pa->app.draw_time_ns + pa->app.gpu_time_ns;
-	uint64_t min_ns = min_app_time(pa);
+	int64_t total_ns = pa->app.cpu_time_ns + pa->app.draw_time_ns + pa->app.gpu_time_ns;
+	int64_t min_ns = min_app_time(pa);
 
 	if (total_ns < min_ns) {
 		total_ns = min_ns;
@@ -263,30 +263,30 @@ total_app_time_ns(const struct pacing_app *pa)
 	return total_ns;
 }
 
-static uint64_t
+static int64_t
 total_compositor_time_ns(const struct pacing_app *pa)
 {
 	return margin_time(pa) + pa->last_input.extra_ns;
 }
 
-static uint64_t
+static int64_t
 total_app_and_compositor_time_ns(const struct pacing_app *pa)
 {
 	return total_app_time_ns(pa) + total_compositor_time_ns(pa);
 }
 
-static uint64_t
+static int64_t
 calc_period(const struct pacing_app *pa)
 {
 	// Error checking.
-	uint64_t base_period_ns = min_period(pa);
+	int64_t base_period_ns = min_period(pa);
 	if (base_period_ns == 0) {
 		assert(false && "Have not yet received and samples from timing driver.");
 		base_period_ns = U_TIME_1MS_IN_NS * 16; // Sure
 	}
 
 	// Calculate the using both values separately.
-	uint64_t period_ns = base_period_ns;
+	int64_t period_ns = base_period_ns;
 	while (pa->app.cpu_time_ns > period_ns) {
 		period_ns += base_period_ns;
 	}
@@ -302,15 +302,15 @@ calc_period(const struct pacing_app *pa)
 	return period_ns;
 }
 
-static uint64_t
-predict_display_time(const struct pacing_app *pa, uint64_t now_ns, uint64_t period_ns)
+static int64_t
+predict_display_time(const struct pacing_app *pa, int64_t now_ns, int64_t period_ns)
 {
 
 	// Total app and compositor time to produce a frame
-	uint64_t app_and_compositor_time_ns = total_app_and_compositor_time_ns(pa);
+	int64_t app_and_compositor_time_ns = total_app_and_compositor_time_ns(pa);
 
 	// Start from the last time that the driver displayed something.
-	uint64_t val = last_sample_displayed(pa);
+	int64_t val = last_sample_displayed(pa);
 
 	// Return a time after the last returned display time. Add half the
 	// display period to the comparison for robustness when the last display
@@ -369,16 +369,16 @@ do_tracing(struct pacing_app *pa, struct u_pa_frame *f)
 	}
 
 #ifdef U_TRACE_TRACY // Uses Tracy specific things.
-	uint64_t cpu_ns = f->when.begin_ns - f->when.wait_woke_ns;
+	int64_t cpu_ns = f->when.begin_ns - f->when.wait_woke_ns;
 	TracyCPlot("App CPU(ms)", time_ns_to_ms_f(cpu_ns));
 
-	uint64_t draw_ns = f->when.delivered_ns - f->when.begin_ns;
+	int64_t draw_ns = f->when.delivered_ns - f->when.begin_ns;
 	TracyCPlot("App Draw(ms)", time_ns_to_ms_f(draw_ns));
 
-	uint64_t gpu_ns = f->when.gpu_done_ns - f->when.delivered_ns;
+	int64_t gpu_ns = f->when.gpu_done_ns - f->when.delivered_ns;
 	TracyCPlot("App GPU(ms)", time_ns_to_ms_f(gpu_ns));
 
-	uint64_t frame_ns = f->when.gpu_done_ns - f->when.wait_woke_ns;
+	int64_t frame_ns = f->when.gpu_done_ns - f->when.wait_woke_ns;
 	TracyCPlot("App Frame(ms)", time_ns_to_ms_f(frame_ns));
 
 	int64_t wake_diff_ns = (int64_t)f->when.wait_woke_ns - (int64_t)f->predicted_wake_up_time_ns;
@@ -395,7 +395,7 @@ do_tracing(struct pacing_app *pa, struct u_pa_frame *f)
 	TE_BEG(pa_cpu, f->when.predicted_ns, "sleep");
 	TE_END(pa_cpu, f->when.wait_woke_ns);
 
-	uint64_t cpu_start_ns = f->when.wait_woke_ns + 1;
+	int64_t cpu_start_ns = f->when.wait_woke_ns + 1;
 	TE_BEG(pa_cpu, cpu_start_ns, "cpu");
 	TE_END(pa_cpu, f->when.begin_ns);
 
@@ -433,11 +433,11 @@ do_tracing(struct pacing_app *pa, struct u_pa_frame *f)
 
 static void
 pa_predict(struct u_pacing_app *upa,
-           uint64_t now_ns,
+           int64_t now_ns,
            int64_t *out_frame_id,
-           uint64_t *out_wake_up_time,
-           uint64_t *out_predicted_display_time,
-           uint64_t *out_predicted_display_period)
+           int64_t *out_wake_up_time,
+           int64_t *out_predicted_display_time,
+           int64_t *out_predicted_display_period)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -446,7 +446,7 @@ pa_predict(struct u_pacing_app *upa,
 
 	DEBUG_PRINT_ID(frame_id);
 
-	uint64_t period_ns;
+	int64_t period_ns;
 
 	/*
 	 * We can either limit the application to a calculated frame rate that
@@ -459,13 +459,26 @@ pa_predict(struct u_pacing_app *upa,
 		period_ns = calc_period(pa);
 	}
 
-	uint64_t predict_ns = predict_display_time(pa, now_ns, period_ns);
+	int64_t predict_ns = predict_display_time(pa, now_ns, period_ns);
 	// How long we think the frame should take.
-	uint64_t frame_time_ns = total_app_time_ns(pa);
+	int64_t frame_time_ns = total_app_time_ns(pa);
 	// When should the client wake up.
-	uint64_t wake_up_time_ns = predict_ns - total_app_and_compositor_time_ns(pa);
+	int64_t wake_up_time_ns;
+
+	/*
+	 * We can either wake the app to render as fast as possible or at the
+	 * predicted time period minus some app and compositor time.
+	 * The former uses substantially more power but is sometimes useful in debugging
+	 *.or as a workaround.
+	 */
+	if (debug_get_bool_option_immediate_wait_frame_return()) {
+		wake_up_time_ns = now_ns;
+	} else {
+		wake_up_time_ns = predict_ns - total_app_and_compositor_time_ns(pa);
+	}
+
 	// When the client's GPU work should have completed.
-	uint64_t gpu_done_time_ns = predict_ns - total_compositor_time_ns(pa);
+	int64_t gpu_done_time_ns = predict_ns - total_compositor_time_ns(pa);
 
 	pa->last_returned_ns = predict_ns;
 
@@ -493,7 +506,7 @@ pa_predict(struct u_pacing_app *upa,
 }
 
 static void
-pa_mark_point(struct u_pacing_app *upa, int64_t frame_id, enum u_timing_point point, uint64_t when_ns)
+pa_mark_point(struct u_pacing_app *upa, int64_t frame_id, enum u_timing_point point, int64_t when_ns)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -524,7 +537,7 @@ pa_mark_point(struct u_pacing_app *upa, int64_t frame_id, enum u_timing_point po
 }
 
 static void
-pa_mark_discarded(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
+pa_mark_discarded(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -549,7 +562,7 @@ pa_mark_discarded(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
 }
 
 static void
-pa_mark_delivered(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns, uint64_t display_time_ns)
+pa_mark_delivered(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns, int64_t display_time_ns)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -568,7 +581,7 @@ pa_mark_delivered(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns, 
 }
 
 static void
-pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
+pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -596,9 +609,9 @@ pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
 		late = true;
 	}
 
-	uint64_t diff_cpu_ns = f->when.begin_ns - f->when.wait_woke_ns;
-	uint64_t diff_draw_ns = f->when.delivered_ns - f->when.begin_ns;
-	uint64_t diff_gpu_ns = f->when.gpu_done_ns - f->when.delivered_ns;
+	int64_t diff_cpu_ns = f->when.begin_ns - f->when.wait_woke_ns;
+	int64_t diff_draw_ns = f->when.delivered_ns - f->when.begin_ns;
+	int64_t diff_gpu_ns = f->when.gpu_done_ns - f->when.delivered_ns;
 
 	UPA_LOG_D(
 	    "Delivered frame %.2fms %s."                                          //
@@ -629,7 +642,7 @@ pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
 }
 
 static void
-pa_latched(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns, int64_t system_frame_id)
+pa_latched(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns, int64_t system_frame_id)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -653,7 +666,7 @@ pa_latched(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns, int64_t
 }
 
 static void
-pa_retired(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
+pa_retired(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -674,9 +687,9 @@ pa_retired(struct u_pacing_app *upa, int64_t frame_id, uint64_t when_ns)
 
 static void
 pa_info(struct u_pacing_app *upa,
-        uint64_t predicted_display_time_ns,
-        uint64_t predicted_display_period_ns,
-        uint64_t extra_ns)
+        int64_t predicted_display_time_ns,
+        int64_t predicted_display_period_ns,
+        int64_t extra_ns)
 {
 	struct pacing_app *pa = pacing_app(upa);
 
@@ -733,9 +746,9 @@ pa_create(int64_t session_id, struct u_pacing_app **out_upa)
 	u_var_add_root(pa, "App timing info", true);
 	u_var_add_draggable_f32(pa, &pa->min_margin_ms, "Minimum margin(ms)");
 	u_var_add_draggable_f32(pa, &pa->min_app_time_ms, "Minimum app time(ms)");
-	u_var_add_ro_u64(pa, &pa->app.cpu_time_ns, "CPU time(ns)");
-	u_var_add_ro_u64(pa, &pa->app.draw_time_ns, "Draw time(ns)");
-	u_var_add_ro_u64(pa, &pa->app.gpu_time_ns, "GPU time(ns)");
+	u_var_add_ro_i64(pa, &pa->app.cpu_time_ns, "CPU time(ns)");
+	u_var_add_ro_i64(pa, &pa->app.draw_time_ns, "Draw time(ns)");
+	u_var_add_ro_i64(pa, &pa->app.gpu_time_ns, "GPU time(ns)");
 
 	*out_upa = &pa->base;
 

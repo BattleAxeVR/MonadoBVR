@@ -1,63 +1,33 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Helper implementation for native compositors.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup comp_util
  */
 
 #pragma once
 
-#include "util/comp_sync.h"
 #include "util/comp_swapchain.h"
+#include "util/comp_layer_accum.h"
 
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define COMP_MAX_LAYERS 16
-
 /*!
- * A single layer.
+ * Additional per-frame parameters.
+ *
+ * Independent of graphics API, swapchain implementation, etc.
  *
  * @ingroup comp_util
- * @see comp_layer_slot
  */
-struct comp_layer
+struct comp_frame_params
 {
-	/*!
-	 * Up to four compositor swapchains referenced per layer.
-	 *
-	 * Unused elements should be set to null.
-	 */
-	struct comp_swapchain *sc_array[XRT_MAX_VIEWS * 2];
-
-	/*!
-	 * All basic (trivially-serializable) data associated with a layer.
-	 */
-	struct xrt_layer_data data;
-};
-
-/*!
- * A stack of layers.
- *
- * @ingroup comp_util
- * @see comp_base
- */
-struct comp_layer_slot
-{
-	//! The per frame data.
-	struct xrt_layer_frame_data data;
-
-	//! All of the layers.
-	struct comp_layer layers[COMP_MAX_LAYERS];
-
-	//! Number of submitted layers.
-	uint32_t layer_count;
-
 	//! Special case one layer projection/projection-depth fast-path.
 	bool one_projection_layer_fast_path;
 
@@ -71,22 +41,23 @@ struct comp_layer_slot
  * A simple compositor base that handles a lot of things for you.
  *
  * Things it handles for you:
- * * App swapchains
- * * App fences
- * * Vulkan bundle (needed for swapchains and fences)
- * * Layer tracking, not @ref xrt_compositor::layer_commit
- * * Wait function, not @ref xrt_compositor::predict_frame
  *
- * Functions it does not handle:
- * * @ref xrt_compositor::begin_session
- * * @ref xrt_compositor::end_session
- * * @ref xrt_compositor::predict_frame
- * * @ref xrt_compositor::mark_frame
- * * @ref xrt_compositor::begin_frame
- * * @ref xrt_compositor::discard_frame
- * * @ref xrt_compositor::layer_commit
- * * @ref xrt_compositor::poll_events
- * * @ref xrt_compositor::destroy
+ * - App swapchains
+ * - App fences
+ * - Vulkan bundle (needed for swapchains and fences)
+ * - Layer tracking, not @ref xrt_compositor::layer_commit
+ * - Wait function, not @ref xrt_compositor::predict_frame
+ *
+ * Functions it does not implement:
+ *
+ * - @ref xrt_compositor::begin_session
+ * - @ref xrt_compositor::end_session
+ * - @ref xrt_compositor::predict_frame
+ * - @ref xrt_compositor::mark_frame
+ * - @ref xrt_compositor::begin_frame
+ * - @ref xrt_compositor::discard_frame
+ * - @ref xrt_compositor::layer_commit
+ * - @ref xrt_compositor::destroy
  *
  * Partially implements @ref xrt_compositor_native, meant to serve as
  * the base of a main compositor implementation.
@@ -108,8 +79,11 @@ struct comp_base
 	//! Swapchain garbage collector, used by swapchain, child class needs to call.
 	struct comp_swapchain_shared cscs;
 
-	//! We only need to track a single slot.
-	struct comp_layer_slot slot;
+	//! Collect layers for a single frame.
+	struct comp_layer_accum layer_accum;
+
+	//! Parameters for a single frame.
+	struct comp_frame_params frame_params;
 };
 
 
@@ -120,7 +94,7 @@ struct comp_base
  */
 
 /*!
- * Convenience function to convert a xrt_compositor to a comp_base.
+ * Convenience function to convert an xrt_compositor to a comp_base.
  *
  * @private @memberof comp_base
  */

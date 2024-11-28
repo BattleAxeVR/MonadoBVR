@@ -12,6 +12,7 @@
 
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
+#include "xrt/xrt_config_os.h"
 
 
 #ifdef __cplusplus
@@ -21,10 +22,36 @@ extern "C" {
 
 struct xrt_prober;
 struct xrt_device;
+struct xrt_instance_android;
 struct xrt_space_overseer;
 struct xrt_system;
 struct xrt_system_devices;
 struct xrt_system_compositor;
+
+struct _JavaVM;
+
+/*!
+ * Platform-specific information for an instance.
+ *
+ * Does not get transported between processes.
+ *
+ * @addtogroup xrt_iface
+ */
+struct xrt_platform_info
+{
+#if defined(XRT_OS_ANDROID) || defined(XRT_DOXYGEN)
+	/*!
+	 * @name Android members
+	 * @{
+	 */
+	struct _JavaVM *vm;
+	void *context;
+	/*! @} */
+#else
+	//! To avoid empty structs.
+	uint32_t _padding;
+#endif
+};
 
 
 /*!
@@ -35,9 +62,13 @@ struct xrt_system_compositor;
 #define XRT_MAX_APPLICATION_NAME_SIZE 128
 
 /*!
- * Information provided by the application at instance create time.
+ * Non-process-specific information provided by the application at instance create time.
+ *
+ * This is transported between client and server over IPC.
+ *
+ * @see xrt_instance_info
  */
-struct xrt_instance_info
+struct xrt_application_info
 {
 	char application_name[XRT_MAX_APPLICATION_NAME_SIZE];
 	bool ext_hand_tracking_enabled;
@@ -45,6 +76,21 @@ struct xrt_instance_info
 	bool ext_hand_interaction_enabled;
 	bool htc_facial_tracking_enabled;
 	bool fb_body_tracking_enabled;
+	bool fb_face_tracking2_enabled;
+};
+
+/*!
+ * Information provided by the application at instance create time.
+ *
+ * Some information may be process-specific.
+ */
+struct xrt_instance_info
+{
+	//! Generic data from application.
+	struct xrt_application_info app_info;
+
+	//! Process-specific, platform-specific data.
+	struct xrt_platform_info platform_info;
 };
 
 /*!
@@ -69,7 +115,7 @@ struct xrt_instance
 	/*!
 	 * @name Interface Methods
 	 *
-	 * All implementations of the xrt_instance implementation must
+	 * All implementations of the xrt_instance interface must
 	 * populate all these function pointers with their implementation
 	 * methods. To use this interface, see the helper functions.
 	 * @{
@@ -130,9 +176,23 @@ struct xrt_instance
 	/*!
 	 * @}
 	 */
+
+	/*!
+	 * Instance information structure, including both platform and application info.
+	 */
 	struct xrt_instance_info instance_info;
 
-	uint64_t startup_timestamp;
+	/*!
+	 * CLOCK_MONOTONIC timestamp of the instance startup.
+	 */
+	int64_t startup_timestamp;
+
+	/*!
+	 * An "aspect" of the xrt_instance interface, used only on Android.
+	 *
+	 * @see xrt_instance_android
+	 */
+	struct xrt_instance_android *android_instance;
 };
 
 /*!

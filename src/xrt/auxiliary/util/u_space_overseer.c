@@ -89,6 +89,9 @@ struct u_space_overseer
 	//! Map from xdev to space, each entry holds a reference.
 	struct u_hashmap_int *xdev_map;
 
+	//! Map from xrt_tracking_origin to space, each entry holds a reference.
+	struct u_hashmap_int *xto_map;
+
 	//! Tracks usage of reference spaces.
 	struct xrt_reference ref_space_use[XRT_SPACE_REFERENCE_TYPE_COUNT];
 
@@ -110,6 +113,11 @@ struct u_space_overseer
 	 * spaces and that they share the same parent.
 	 */
 	bool can_do_local_spaces_recenter;
+
+	/*!
+	 * Create independent local and local_floor per application
+	 */
+	bool per_app_local_spaces;
 };
 
 
@@ -210,6 +218,27 @@ find_xdev_space_read_locked(struct u_space_overseer *uso, struct xrt_device *xde
 	return (struct u_space *)ptr;
 }
 
+static struct u_space *
+find_xto_space_read_locked(struct u_space_overseer *uso, struct xrt_tracking_origin *xto)
+{
+	void *ptr = NULL;
+	uint64_t key = (uint64_t)(intptr_t)xto;
+	u_hashmap_int_find(uso->xto_map, key, &ptr);
+
+	if (ptr == NULL) {
+		U_LOG_E("Looking for space belonging to unknown xrt_tracking_origin! '%s'", xto->name);
+	}
+	assert(ptr != NULL);
+
+	return (struct u_space *)ptr;
+}
+
+static bool
+space_is_offset_compatible(struct u_space *us)
+{
+	return us != NULL && (us->type == U_SPACE_TYPE_NULL || us->type == U_SPACE_TYPE_OFFSET);
+}
+
 /*!
  * Updates the offset of a NULL or OFFSET space.
  */
@@ -288,7 +317,7 @@ notify_ref_space_usage_device(struct u_space_overseer *uso, enum xrt_reference_s
  * order.
  */
 static void
-push_then_traverse(struct xrt_relation_chain *xrc, struct u_space *space, uint64_t at_timestamp_ns)
+push_then_traverse(struct xrt_relation_chain *xrc, struct u_space *space, int64_t at_timestamp_ns)
 {
 	switch (space->type) {
 	case U_SPACE_TYPE_NULL: break; // No-op
@@ -316,7 +345,7 @@ push_then_traverse(struct xrt_relation_chain *xrc, struct u_space *space, uint64
  * the reversed order.
  */
 static void
-traverse_then_push_inverse(struct xrt_relation_chain *xrc, struct u_space *space, uint64_t at_timestamp_ns)
+traverse_then_push_inverse(struct xrt_relation_chain *xrc, struct u_space *space, int64_t at_timestamp_ns)
 {
 	// Done traversing.
 	switch (space->type) {
@@ -350,7 +379,7 @@ build_relation_chain_read_locked(struct u_space_overseer *uso,
                                  struct xrt_relation_chain *xrc,
                                  struct u_space *base,
                                  struct u_space *target,
-                                 uint64_t at_timestamp_ns)
+                                 int64_t at_timestamp_ns)
 {
 	assert(xrc != NULL);
 	assert(base != NULL);
@@ -365,7 +394,7 @@ build_relation_chain(struct u_space_overseer *uso,
                      struct xrt_relation_chain *xrc,
                      struct u_space *base,
                      struct u_space *target,
-                     uint64_t at_timestamp_ns)
+                     int64_t at_timestamp_ns)
 {
 	pthread_rwlock_rdlock(&uso->lock);
 	build_relation_chain_read_locked(uso, xrc, base, target, at_timestamp_ns);
@@ -507,7 +536,7 @@ static xrt_result_t
 locate_space(struct xrt_space_overseer *xso,
              struct xrt_space *base_space,
              const struct xrt_pose *base_offset,
-             uint64_t at_timestamp_ns,
+             int64_t at_timestamp_ns,
              struct xrt_space *space,
              const struct xrt_pose *offset,
              struct xrt_space_relation *out_relation)
@@ -563,7 +592,7 @@ static xrt_result_t
 locate_spaces(struct xrt_space_overseer *xso,
               struct xrt_space *base_space,
               const struct xrt_pose *base_offset,
-              uint64_t at_timestamp_ns,
+              int64_t at_timestamp_ns,
               struct xrt_space **spaces,
               uint32_t space_count,
               const struct xrt_pose *offsets,
@@ -613,7 +642,7 @@ static xrt_result_t
 locate_device(struct xrt_space_overseer *xso,
               struct xrt_space *base_space,
               const struct xrt_pose *base_offset,
-              uint64_t at_timestamp_ns,
+              int64_t at_timestamp_ns,
               struct xrt_device *xdev,
               struct xrt_space_relation *out_relation)
 {
@@ -802,6 +831,208 @@ err_unlock:
 	return XRT_ERROR_RECENTERING_NOT_SUPPORTED;
 }
 
+static xrt_result_t
+create_local_space(struct xrt_space_overseer *xso,
+                   struct xrt_space **out_local_space,
+                   struct xrt_space **out_local_floor_space)
+{
+	assert(xso->semantic.root != NULL);
+	struct u_space_overseer *uso = u_space_overseer(xso);
+	if (!uso->per_app_local_spaces) {
+		xrt_space_reference(out_local_space, xso->semantic.local);
+		xrt_space_reference(out_local_floor_space, xso->semantic.local_floor);
+		return XRT_SUCCESS;
+	}
+
+	struct xrt_pose identity = XRT_POSE_IDENTITY;
+	struct xrt_space_relation xsr = XRT_SPACE_RELATION_ZERO;
+	xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, os_monotonic_get_ns(), xso->semantic.view,
+	                                &identity, &xsr);
+
+	bool pos_valid = (xsr.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0;
+	bool ori_valid = (xsr.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0;
+	if (!pos_valid || !ori_valid) {
+		xsr.pose = (struct xrt_pose)XRT_POSE_IDENTITY;
+		xsr.pose.position.y = 1.6;
+	}
+
+	xsr.pose.orientation.x = 0;
+	xsr.pose.orientation.z = 0;
+	math_quat_normalize(&xsr.pose.orientation);
+
+	xrt_result_t xret = XRT_SUCCESS;
+
+	if (out_local_space != NULL) {
+		xret = create_offset_space(xso, xso->semantic.root, &xsr.pose, out_local_space);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to create offset space LOCAL!");
+			return xret;
+		}
+	}
+
+	if (out_local_floor_space != NULL) {
+		if (xso->semantic.stage != NULL) {
+			struct u_space *ustage = u_space(xso->semantic.stage);
+			xsr.pose.position.y = ustage->offset.pose.position.y;
+		} else {
+			xsr.pose.position.y = 0;
+		}
+		xret = create_offset_space(xso, xso->semantic.root, &xsr.pose, out_local_floor_space);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to create offset space LOCAL_FLOOR!");
+			return xret;
+		}
+	}
+
+	return xret;
+}
+
+static xrt_result_t
+get_tracking_origin_offset(struct xrt_space_overseer *xso, struct xrt_tracking_origin *xto, struct xrt_pose *out_offset)
+{
+	struct u_space_overseer *uso = u_space_overseer(xso);
+	xrt_result_t xret = XRT_SUCCESS;
+
+	pthread_rwlock_rdlock(&uso->lock);
+
+	struct u_space *us = find_xto_space_read_locked(uso, xto);
+	if (!space_is_offset_compatible(us)) {
+		xret = XRT_ERROR_UNSUPPORTED_SPACE_TYPE;
+		goto unlock;
+	}
+
+	get_offset_or_ident_read_locked(us, out_offset);
+
+unlock:
+	pthread_rwlock_unlock(&uso->lock);
+	return xret;
+}
+
+static xrt_result_t
+set_tracking_origin_offset(struct xrt_space_overseer *xso,
+                           struct xrt_tracking_origin *xto,
+                           const struct xrt_pose *offset)
+{
+	struct u_space_overseer *uso = u_space_overseer(xso);
+	xrt_result_t xret = XRT_SUCCESS;
+
+	pthread_rwlock_rdlock(&uso->lock);
+
+	struct u_space *us = find_xto_space_read_locked(uso, xto);
+	if (!space_is_offset_compatible(us)) {
+		xret = XRT_ERROR_UNSUPPORTED_SPACE_TYPE;
+		goto unlock;
+	}
+
+	update_offset_write_locked(us, offset);
+
+unlock:
+	pthread_rwlock_unlock(&uso->lock);
+	return xret;
+}
+
+static xrt_result_t
+get_reference_space_offset(struct xrt_space_overseer *xso,
+                           enum xrt_reference_space_type type,
+                           struct xrt_pose *out_offset)
+{
+	struct u_space_overseer *uso = u_space_overseer(xso);
+	xrt_result_t xret = XRT_SUCCESS;
+
+	pthread_rwlock_rdlock(&uso->lock);
+
+	struct u_space *us = get_semantic_space(uso, type);
+	if (!space_is_offset_compatible(us)) {
+		xret = XRT_ERROR_UNSUPPORTED_SPACE_TYPE;
+		goto unlock;
+	}
+
+	get_offset_or_ident_read_locked(us, out_offset);
+
+unlock:
+	pthread_rwlock_unlock(&uso->lock);
+	return xret;
+}
+
+static xrt_result_t
+set_reference_space_offset(struct xrt_space_overseer *xso,
+                           enum xrt_reference_space_type type,
+                           const struct xrt_pose *offset)
+{
+	if (type == XRT_SPACE_REFERENCE_TYPE_LOCAL_FLOOR) {
+		// LOCAL_FLOOR is calculated from LOCAL and STAGE
+		return XRT_ERROR_UNSUPPORTED_SPACE_TYPE;
+	}
+
+	struct u_space_overseer *uso = u_space_overseer(xso);
+
+	if (uso->can_do_local_spaces_recenter) {
+		return XRT_ERROR_RECENTERING_NOT_SUPPORTED;
+	}
+
+	xrt_result_t xret = XRT_SUCCESS;
+
+	pthread_rwlock_wrlock(&uso->lock);
+
+	struct u_space *us = get_semantic_space(uso, type);
+	if (!space_is_offset_compatible(us)) {
+		xret = XRT_ERROR_UNSUPPORTED_SPACE_TYPE;
+		goto unlock;
+	}
+
+	// can_do_local_spaces_recenter ensures that local_floor can be offset
+	struct u_space *ufloor = u_space(xso->semantic.local_floor);
+	struct xrt_pose floor;
+	get_offset_or_ident_read_locked(ufloor, &floor);
+
+	if (type == XRT_SPACE_REFERENCE_TYPE_STAGE) {
+		floor.position.y = offset->position.y;
+	} else if (type == XRT_SPACE_REFERENCE_TYPE_LOCAL) {
+		floor.orientation = offset->orientation;
+		floor.position.x = offset->position.x;
+		floor.position.z = offset->position.z;
+	}
+
+	update_offset_write_locked(us, offset);
+	update_offset_write_locked(ufloor, &floor);
+
+	// Push the events.
+	union xrt_session_event xse = XRT_STRUCT_INIT;
+
+	// Basics
+	xse.ref_change.event_type = XRT_SESSION_EVENT_REFERENCE_SPACE_CHANGE_PENDING;
+	xse.ref_change.pose_valid = false;
+	xse.ref_change.pose_in_previous_space = (struct xrt_pose)XRT_POSE_IDENTITY;
+	xse.ref_change.timestamp_ns = os_monotonic_get_ns();
+
+	if (type == XRT_SPACE_REFERENCE_TYPE_STAGE) {
+		xse.ref_change.ref_type = XRT_SPACE_REFERENCE_TYPE_STAGE;
+		xret = xrt_session_event_sink_push(uso->broadcast, &xse);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to push event STAGE!");
+		}
+	} else if (type == XRT_SPACE_REFERENCE_TYPE_LOCAL) {
+		xse.ref_change.ref_type = XRT_SPACE_REFERENCE_TYPE_LOCAL;
+		xret = xrt_session_event_sink_push(uso->broadcast, &xse);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to push event LOCAL!");
+		}
+	} else {
+		// did not change STAGE or LOCAL -> LOCAL_FLOOR also did not change
+		goto unlock;
+	}
+
+	xse.ref_change.ref_type = XRT_SPACE_REFERENCE_TYPE_LOCAL_FLOOR;
+	xret = xrt_session_event_sink_push(uso->broadcast, &xse);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Failed to push event LOCAL_FLOOR!");
+	}
+
+unlock:
+	pthread_rwlock_unlock(&uso->lock);
+	return xret;
+}
+
 static void
 destroy(struct xrt_space_overseer *xso)
 {
@@ -817,6 +1048,17 @@ destroy(struct xrt_space_overseer *xso)
 	// Each device has a reference to its space, make sure to unreference before creating.
 	u_hashmap_int_clear_and_call_for_each(uso->xdev_map, hashmap_unreference_space_items, uso);
 	u_hashmap_int_destroy(&uso->xdev_map);
+
+	u_hashmap_int_clear_and_call_for_each(uso->xto_map, hashmap_unreference_space_items, uso);
+	u_hashmap_int_destroy(&uso->xto_map);
+
+	for (int id = 0; id < XRT_MAX_CLIENT_SPACES; id++) {
+		struct xrt_space **xslocal_ptr = (struct xrt_space **)&xso->localspace[id];
+		xrt_space_reference(xslocal_ptr, NULL);
+
+		struct xrt_space **xslocalfloor_ptr = (struct xrt_space **)&xso->localfloorspace[id];
+		xrt_space_reference(xslocalfloor_ptr, NULL);
+	}
 
 	pthread_rwlock_destroy(&uso->lock);
 
@@ -834,6 +1076,7 @@ struct u_space_overseer *
 u_space_overseer_create(struct xrt_session_event_sink *broadcast)
 {
 	struct u_space_overseer *uso = U_TYPED_CALLOC(struct u_space_overseer);
+	uso->base.create_local_space = create_local_space;
 	uso->base.create_offset_space = create_offset_space;
 	uso->base.create_pose_space = create_pose_space;
 	uso->base.locate_space = locate_space;
@@ -842,6 +1085,10 @@ u_space_overseer_create(struct xrt_session_event_sink *broadcast)
 	uso->base.ref_space_inc = ref_space_inc;
 	uso->base.ref_space_dec = ref_space_dec;
 	uso->base.recenter_local_spaces = recenter_local_spaces;
+	uso->base.get_tracking_origin_offset = get_tracking_origin_offset;
+	uso->base.set_tracking_origin_offset = set_tracking_origin_offset;
+	uso->base.get_reference_space_offset = get_reference_space_offset;
+	uso->base.set_reference_space_offset = set_reference_space_offset;
 	uso->base.destroy = destroy;
 	uso->broadcast = broadcast;
 
@@ -851,6 +1098,9 @@ u_space_overseer_create(struct xrt_session_event_sink *broadcast)
 	assert(ret == 0);
 
 	ret = u_hashmap_int_create(&uso->xdev_map);
+	assert(ret == 0);
+
+	ret = u_hashmap_int_create(&uso->xto_map);
 	assert(ret == 0);
 
 	create_and_set_root_space(uso);
@@ -864,13 +1114,11 @@ u_space_overseer_legacy_setup(struct u_space_overseer *uso,
                               uint32_t xdev_count,
                               struct xrt_device *head,
                               const struct xrt_pose *local_offset,
-                              bool root_is_unbounded)
+                              bool root_is_unbounded,
+                              bool per_app_local_spaces)
 {
 	struct xrt_space *root = uso->base.semantic.root; // Convenience
-
-	struct u_hashmap_int *torig_map = NULL;
-	u_hashmap_int_create(&torig_map);
-
+	uso->per_app_local_spaces = per_app_local_spaces;
 
 	for (uint32_t i = 0; i < xdev_count; i++) {
 		struct xrt_device *xdev = xdevs[i];
@@ -879,21 +1127,17 @@ u_space_overseer_legacy_setup(struct u_space_overseer *uso,
 		struct xrt_space *xs = NULL;
 
 		void *ptr = NULL;
-		u_hashmap_int_find(torig_map, key, &ptr);
+		u_hashmap_int_find(uso->xto_map, key, &ptr);
 
 		if (ptr != NULL) {
 			xs = (struct xrt_space *)ptr;
 		} else {
-			u_space_overseer_create_offset_space(uso, root, &torig->offset, &xs);
-			u_hashmap_int_insert(torig_map, key, xs);
+			u_space_overseer_create_offset_space(uso, root, &torig->initial_offset, &xs);
+			u_hashmap_int_insert(uso->xto_map, key, xs);
 		}
 
 		u_space_overseer_link_space_to_device(uso, xs, xdev);
 	}
-
-	// Each item has a exrta reference make sure to clear before destroying.
-	u_hashmap_int_clear_and_call_for_each(torig_map, hashmap_unreference_space_items, uso);
-	u_hashmap_int_destroy(&torig_map);
 
 	// If these are set something is probably wrong, but just in case unset them.
 	assert(uso->base.semantic.view == NULL);
@@ -906,12 +1150,12 @@ u_space_overseer_legacy_setup(struct u_space_overseer *uso,
 	xrt_space_reference(&uso->base.semantic.unbounded, NULL);
 
 	if (head != NULL && head->stage_supported) {
-		// stage space is a pose space
+		// stage poses are polled from the driver
 		u_space_overseer_create_pose_space(uso, head, XRT_INPUT_GENERIC_STAGE_SPACE_POSE,
 		                                   &uso->base.semantic.stage);
 	} else {
-		// Assume the root space is the center of the stage space.
-		xrt_space_reference(&uso->base.semantic.stage, uso->base.semantic.root);
+		// stage offset is managed by space overseer
+		u_space_overseer_create_null_space(uso, uso->base.semantic.root, &uso->base.semantic.stage);
 	}
 
 	// If the system wants to support the space, set root as unbounded.

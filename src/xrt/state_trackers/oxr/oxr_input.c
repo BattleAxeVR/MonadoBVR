@@ -23,6 +23,7 @@
 #include "oxr_input_transform.h"
 #include "oxr_subaction.h"
 #include "oxr_conversions.h"
+#include "oxr_xret.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -1297,8 +1298,6 @@ oxr_action_attachment_update(struct oxr_logger *log,
 		return;
 	}
 
-	//! @todo "/user" sub-action path.
-
 #define UPDATE_SELECT(X)                                                                                               \
 	struct oxr_subaction_paths subaction_paths_##X = {0};                                                          \
 	subaction_paths_##X.X = true;                                                                                  \
@@ -1814,7 +1813,10 @@ oxr_action_sync_data(struct oxr_logger *log,
 
 	// Loop over all xdev devices.
 	for (size_t i = 0; i < sess->sys->xsysd->xdev_count; i++) {
-		oxr_xdev_update(sess->sys->xsysd->xdevs[i]);
+		if (sess->sys->xsysd->xdevs[i]) {
+			xrt_result_t xret = xrt_device_update_inputs(sess->sys->xsysd->xdevs[i]);
+			OXR_CHECK_XRET(log, sess, xret, oxr_action_sync_data);
+		}
 	}
 
 	// Reset all action set attachments.

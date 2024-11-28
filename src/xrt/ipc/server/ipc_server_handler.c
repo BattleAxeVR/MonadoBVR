@@ -49,6 +49,25 @@ validate_device_id(volatile struct ipc_client_state *ics, int64_t device_id, str
 }
 
 static xrt_result_t
+validate_origin_id(volatile struct ipc_client_state *ics, int64_t origin_id, struct xrt_tracking_origin **out_xtrack)
+{
+	if (origin_id >= XRT_SYSTEM_MAX_DEVICES) {
+		IPC_ERROR(ics->server, "Invalid origin ID (origin_id >= XRT_SYSTEM_MAX_DEVICES)!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	struct xrt_tracking_origin *xtrack = ics->server->xtracks[origin_id];
+	if (xtrack == NULL) {
+		IPC_ERROR(ics->server, "Invalid origin ID (xtrack is NULL)!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	*out_xtrack = xtrack;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 validate_swapchain_state(volatile struct ipc_client_state *ics, uint32_t *out_index)
 {
 	// Our handle is just the index for now.
@@ -93,6 +112,18 @@ validate_reference_space_type(volatile struct ipc_client_state *ics, enum xrt_re
 
 	return XRT_SUCCESS;
 }
+
+static xrt_result_t
+validate_device_feature_type(volatile struct ipc_client_state *ics, enum xrt_device_feature_type type)
+{
+	if ((uint32_t)type >= XRT_DEVICE_FEATURE_MAX_ENUM) {
+		IPC_ERROR(ics->server, "Invalid device feature type %u", type);
+		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	}
+
+	return XRT_SUCCESS;
+}
+
 
 static xrt_result_t
 validate_space_id(volatile struct ipc_client_state *ics, int64_t space_id, struct xrt_space **out_xspc)
@@ -154,6 +185,95 @@ track_space(volatile struct ipc_client_state *ics, struct xrt_space *xs, uint32_
 }
 
 
+static xrt_result_t
+get_new_localspace_id(volatile struct ipc_client_state *ics, uint32_t *out_local_id, uint32_t *out_local_floor_id)
+{
+	// Our handle is just the index for now.
+	uint32_t index = 0;
+	for (; index < IPC_MAX_CLIENT_SPACES; index++) {
+		if (ics->server->xso->localspace[index] == NULL) {
+			break;
+		}
+	}
+
+	if (index >= IPC_MAX_CLIENT_SPACES) {
+		IPC_ERROR(ics->server, "Too many localspaces!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	ics->local_space_overseer_index = index;
+	index = 0;
+	for (; index < IPC_MAX_CLIENT_SPACES; index++) {
+		if (ics->xspcs[index] == NULL) {
+			break;
+		}
+	}
+
+	if (index >= IPC_MAX_CLIENT_SPACES) {
+		IPC_ERROR(ics->server, "Too many spaces!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	ics->local_space_index = index;
+	*out_local_id = index;
+
+	for (index = 0; index < IPC_MAX_CLIENT_SPACES; index++) {
+		if (ics->server->xso->localfloorspace[index] == NULL) {
+			break;
+		}
+	}
+
+	if (index >= IPC_MAX_CLIENT_SPACES) {
+		IPC_ERROR(ics->server, "Too many localfloorspaces!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	ics->local_floor_space_overseer_index = index;
+
+	for (index = 0; index < IPC_MAX_CLIENT_SPACES; index++) {
+		if (ics->xspcs[index] == NULL && index != ics->local_space_index) {
+			break;
+		}
+	}
+
+	if (index >= IPC_MAX_CLIENT_SPACES) {
+		IPC_ERROR(ics->server, "Too many spaces!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	ics->local_floor_space_index = index;
+	*out_local_floor_id = index;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+create_localspace(volatile struct ipc_client_state *ics, uint32_t *out_local_id, uint32_t *out_local_floor_id)
+{
+	uint32_t local_id = UINT32_MAX;
+	uint32_t local_floor_id = UINT32_MAX;
+	xrt_result_t xret = get_new_localspace_id(ics, &local_id, &local_floor_id);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	struct xrt_space_overseer *xso = ics->server->xso;
+	struct xrt_space **xslocal_ptr = (struct xrt_space **)&ics->xspcs[local_id];
+	struct xrt_space **xslocalfloor_ptr = (struct xrt_space **)&ics->xspcs[local_floor_id];
+
+	xret = xrt_space_overseer_create_local_space(xso, &xso->localspace[ics->local_space_overseer_index],
+	                                             &xso->localfloorspace[ics->local_floor_space_overseer_index]);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	xrt_space_reference(xslocal_ptr, xso->localspace[ics->local_space_overseer_index]);
+	xrt_space_reference(xslocalfloor_ptr, xso->localfloorspace[ics->local_floor_space_overseer_index]);
+	*out_local_id = local_id;
+	*out_local_floor_id = local_floor_id;
+
+	return XRT_SUCCESS;
+}
+
 /*
  *
  * Handle functions.
@@ -205,6 +325,9 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 #endif
 #ifdef OXR_HAVE_FB_body_tracking
 	EXT(fb_body_tracking_enabled);
+#endif
+#ifdef OXR_HAVE_FB_face_tracking2
+	EXT(fb_face_tracking2_enabled);
 #endif
 
 #undef EXT
@@ -299,6 +422,7 @@ ipc_handle_session_begin(volatile struct ipc_client_state *ics)
 	    .ext_hand_interaction_enabled = ics->client_state.info.ext_hand_interaction_enabled,
 	    .htc_facial_tracking_enabled = ics->client_state.info.htc_facial_tracking_enabled,
 	    .fb_body_tracking_enabled = ics->client_state.info.fb_body_tracking_enabled,
+	    .fb_face_tracking2_enabled = ics->client_state.info.fb_face_tracking2_enabled,
 	};
 
 	return xrt_comp_begin_session(ics->xc, &begin_session_info);
@@ -366,14 +490,11 @@ ipc_handle_space_create_semantic_ids(volatile struct ipc_client_state *ics,
 
 	CREATE(root);
 	CREATE(view);
-	CREATE(local);
-	CREATE(local_floor);
 	CREATE(stage);
 	CREATE(unbounded);
 
 #undef CREATE
-
-	return XRT_SUCCESS;
+	return create_localspace(ics, out_local_id, out_local_floor_id);
 }
 
 xrt_result_t
@@ -456,7 +577,7 @@ xrt_result_t
 ipc_handle_space_locate_space(volatile struct ipc_client_state *ics,
                               uint32_t base_space_id,
                               const struct xrt_pose *base_offset,
-                              uint64_t at_timestamp,
+                              int64_t at_timestamp,
                               uint32_t space_id,
                               const struct xrt_pose *offset,
                               struct xrt_space_relation *out_relation)
@@ -495,7 +616,7 @@ ipc_handle_space_locate_spaces(volatile struct ipc_client_state *ics,
                                uint32_t base_space_id,
                                const struct xrt_pose *base_offset,
                                uint32_t space_count,
-                               uint64_t at_timestamp)
+                               int64_t at_timestamp)
 {
 	IPC_TRACE_MARKER();
 	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
@@ -596,7 +717,7 @@ xrt_result_t
 ipc_handle_space_locate_device(volatile struct ipc_client_state *ics,
                                uint32_t base_space_id,
                                const struct xrt_pose *base_offset,
-                               uint64_t at_timestamp,
+                               int64_t at_timestamp,
                                uint32_t xdev_id,
                                struct xrt_space_relation *out_relation)
 {
@@ -646,6 +767,18 @@ ipc_handle_space_destroy(volatile struct ipc_client_state *ics, uint32_t space_i
 	// Remove volatile
 	struct xrt_space **xs_ptr = (struct xrt_space **)&ics->xspcs[space_id];
 	xrt_space_reference(xs_ptr, NULL);
+
+	if (space_id == ics->local_space_index) {
+		struct xrt_space **xslocal_ptr =
+		    (struct xrt_space **)&ics->server->xso->localspace[ics->local_space_overseer_index];
+		xrt_space_reference(xslocal_ptr, NULL);
+	}
+
+	if (space_id == ics->local_floor_space_index) {
+		struct xrt_space **xslocalfloor_ptr =
+		    (struct xrt_space **)&ics->server->xso->localfloorspace[ics->local_floor_space_overseer_index];
+		xrt_space_reference(xslocalfloor_ptr, NULL);
+	}
 
 	return XRT_SUCCESS;
 }
@@ -716,6 +849,52 @@ ipc_handle_space_recenter_local_spaces(volatile struct ipc_client_state *ics)
 }
 
 xrt_result_t
+ipc_handle_space_get_tracking_origin_offset(volatile struct ipc_client_state *ics,
+                                            uint32_t origin_id,
+                                            struct xrt_pose *out_offset)
+{
+	struct xrt_space_overseer *xso = ics->server->xso;
+	struct xrt_tracking_origin *xto;
+	xrt_result_t xret = validate_origin_id(ics, origin_id, &xto);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	return xrt_space_overseer_get_tracking_origin_offset(xso, xto, out_offset);
+}
+
+xrt_result_t
+ipc_handle_space_set_tracking_origin_offset(volatile struct ipc_client_state *ics,
+                                            uint32_t origin_id,
+                                            const struct xrt_pose *offset)
+{
+	struct xrt_space_overseer *xso = ics->server->xso;
+	struct xrt_tracking_origin *xto;
+	xrt_result_t xret = validate_origin_id(ics, origin_id, &xto);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	return xrt_space_overseer_set_tracking_origin_offset(xso, xto, offset);
+}
+
+xrt_result_t
+ipc_handle_space_get_reference_space_offset(volatile struct ipc_client_state *ics,
+                                            enum xrt_reference_space_type type,
+                                            struct xrt_pose *out_offset)
+{
+	struct xrt_space_overseer *xso = ics->server->xso;
+	return xrt_space_overseer_get_reference_space_offset(xso, type, out_offset);
+}
+
+xrt_result_t
+ipc_handle_space_set_reference_space_offset(volatile struct ipc_client_state *ics,
+                                            enum xrt_reference_space_type type,
+                                            const struct xrt_pose *offset)
+{
+	struct xrt_space_overseer *xso = ics->server->xso;
+	return xrt_space_overseer_set_reference_space_offset(xso, type, offset);
+}
+
+xrt_result_t
 ipc_handle_compositor_get_info(volatile struct ipc_client_state *ics, struct xrt_compositor_info *out_info)
 {
 	IPC_TRACE_MARKER();
@@ -732,9 +911,9 @@ ipc_handle_compositor_get_info(volatile struct ipc_client_state *ics, struct xrt
 xrt_result_t
 ipc_handle_compositor_predict_frame(volatile struct ipc_client_state *ics,
                                     int64_t *out_frame_id,
-                                    uint64_t *out_wake_up_time_ns,
-                                    uint64_t *out_predicted_display_time_ns,
-                                    uint64_t *out_predicted_display_period_ns)
+                                    int64_t *out_wake_up_time_ns,
+                                    int64_t *out_predicted_display_time_ns,
+                                    int64_t *out_predicted_display_period_ns)
 {
 	IPC_TRACE_MARKER();
 
@@ -748,7 +927,7 @@ ipc_handle_compositor_predict_frame(volatile struct ipc_client_state *ics,
 	 */
 	ipc_server_activate_session(ics);
 
-	uint64_t gpu_time_ns = 0;
+	int64_t gpu_time_ns = 0;
 	return xrt_comp_predict_frame(        //
 	    ics->xc,                          //
 	    out_frame_id,                     //
@@ -1527,7 +1706,7 @@ ipc_handle_swapchain_import(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
-ipc_handle_swapchain_wait_image(volatile struct ipc_client_state *ics, uint32_t id, uint64_t timeout_ns, uint32_t index)
+ipc_handle_swapchain_wait_image(volatile struct ipc_client_state *ics, uint32_t id, int64_t timeout_ns, uint32_t index)
 {
 	if (ics->xc == NULL) {
 		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
@@ -1678,7 +1857,11 @@ ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t i
 	struct ipc_shared_device *isdev = &ism->isdevs[device_id];
 
 	// Update inputs.
-	xrt_device_update_inputs(xdev);
+	xrt_result_t xret = xrt_device_update_inputs(xdev);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "Failed to update input");
+		return xret;
+	}
 
 	// Copy data into the shared memory.
 	struct xrt_input *src = xdev->inputs;
@@ -1725,7 +1908,7 @@ xrt_result_t
 ipc_handle_device_get_tracked_pose(volatile struct ipc_client_state *ics,
                                    uint32_t id,
                                    enum xrt_input_name name,
-                                   uint64_t at_timestamp,
+                                   int64_t at_timestamp,
                                    struct xrt_space_relation *out_relation)
 {
 	// To make the code a bit more readable.
@@ -1754,18 +1937,16 @@ ipc_handle_device_get_tracked_pose(volatile struct ipc_client_state *ics,
 	}
 
 	// Get the pose.
-	xrt_device_get_tracked_pose(xdev, name, at_timestamp, out_relation);
-
-	return XRT_SUCCESS;
+	return xrt_device_get_tracked_pose(xdev, name, at_timestamp, out_relation);
 }
 
 xrt_result_t
 ipc_handle_device_get_hand_tracking(volatile struct ipc_client_state *ics,
                                     uint32_t id,
                                     enum xrt_input_name name,
-                                    uint64_t at_timestamp,
+                                    int64_t at_timestamp,
                                     struct xrt_hand_joint_set *out_value,
-                                    uint64_t *out_timestamp)
+                                    int64_t *out_timestamp)
 {
 
 	// To make the code a bit more readable.
@@ -1782,7 +1963,7 @@ xrt_result_t
 ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
                                  uint32_t id,
                                  const struct xrt_vec3 *fallback_eye_relation,
-                                 uint64_t at_timestamp_ns,
+                                 int64_t at_timestamp_ns,
                                  uint32_t view_count)
 {
 	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
@@ -1861,7 +2042,7 @@ xrt_result_t
 ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
                                    uint32_t id,
                                    const struct xrt_vec3 *default_eye_relation,
-                                   uint64_t at_timestamp_ns,
+                                   int64_t at_timestamp_ns,
                                    uint32_t view_count,
                                    struct ipc_info_get_view_poses_2 *out_info)
 {
@@ -1984,15 +2165,73 @@ ipc_handle_system_devices_get_roles(volatile struct ipc_client_state *ics, struc
 }
 
 xrt_result_t
+ipc_handle_system_devices_begin_feature(volatile struct ipc_client_state *ics, enum xrt_device_feature_type type)
+{
+	struct xrt_system_devices *xsysd = ics->server->xsysd;
+	xrt_result_t xret;
+
+	xret = validate_device_feature_type(ics, type);
+	if (xret != XRT_SUCCESS) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	// Is this feature already used?
+	if (ics->device_feature_used[type]) {
+		IPC_ERROR(ics->server, "feature '%u' already used!", type);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	xret = xrt_system_devices_feature_inc(xsysd, type);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "xrt_system_devices_feature_inc failed");
+		return xret;
+	}
+
+	// Can now mark it as used.
+	ics->device_feature_used[type] = true;
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_system_devices_end_feature(volatile struct ipc_client_state *ics, enum xrt_device_feature_type type)
+{
+	struct xrt_system_devices *xsysd = ics->server->xsysd;
+	xrt_result_t xret;
+
+	xret = validate_device_feature_type(ics, type);
+	if (xret != XRT_SUCCESS) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	if (!ics->device_feature_used[type]) {
+		IPC_ERROR(ics->server, "feature '%u' not used!", type);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	xret = xrt_system_devices_feature_dec(xsysd, type);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "xrt_system_devices_feature_dec failed");
+		return xret;
+	}
+
+	// Now we can mark it as not used.
+	ics->device_feature_used[type] = false;
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_device_get_face_tracking(volatile struct ipc_client_state *ics,
                                     uint32_t id,
                                     enum xrt_input_name facial_expression_type,
+                                    int64_t at_timestamp_ns,
                                     struct xrt_facial_expression_set *out_value)
 {
 	const uint32_t device_id = id;
 	struct xrt_device *xdev = get_xdev(ics, device_id);
 	// Get facial expression data.
-	return xrt_device_get_face_tracking(xdev, facial_expression_type, out_value);
+	return xrt_device_get_face_tracking(xdev, facial_expression_type, at_timestamp_ns, out_value);
 }
 
 xrt_result_t
@@ -2009,9 +2248,17 @@ xrt_result_t
 ipc_handle_device_get_body_joints(volatile struct ipc_client_state *ics,
                                   uint32_t id,
                                   enum xrt_input_name body_tracking_type,
-                                  uint64_t desired_timestamp_ns,
+                                  int64_t desired_timestamp_ns,
                                   struct xrt_body_joint_set *out_value)
 {
 	struct xrt_device *xdev = get_xdev(ics, id);
 	return xrt_device_get_body_joints(xdev, body_tracking_type, desired_timestamp_ns, out_value);
+}
+
+xrt_result_t
+ipc_handle_device_get_battery_status(
+    volatile struct ipc_client_state *ics, uint32_t id, bool *out_present, bool *out_charging, float *out_charge)
+{
+	struct xrt_device *xdev = get_xdev(ics, id);
+	return xrt_device_get_battery_status(xdev, out_present, out_charging, out_charge);
 }

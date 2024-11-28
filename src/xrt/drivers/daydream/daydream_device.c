@@ -273,7 +273,7 @@ daydream_device_destroy(struct xrt_device *xdev)
 	free(daydream);
 }
 
-static void
+static xrt_result_t
 daydream_device_update_inputs(struct xrt_device *xdev)
 {
 	struct daydream_device *daydream = daydream_device(xdev);
@@ -306,18 +306,22 @@ daydream_device_update_inputs(struct xrt_device *xdev)
 	// Done now.
 
 	os_mutex_unlock(&daydream->lock);
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 daydream_device_get_tracked_pose(struct xrt_device *xdev,
                                  enum xrt_input_name name,
-                                 uint64_t at_timestamp_ns,
+                                 int64_t at_timestamp_ns,
                                  struct xrt_space_relation *out_relation)
 {
 	struct daydream_device *daydream = daydream_device(xdev);
 
 	(void)at_timestamp_ns;
 	daydream_get_fusion_pose(daydream, name, out_relation);
+
+	return XRT_SUCCESS;
 }
 
 

@@ -13,7 +13,6 @@
 #include "ogl_helpers.h"
 #include "ogl_api.h" // IWYU pragma: keep
 
-#include <inttypes.h>
 
 /*!
  * Check for OpenGL errors, context needs to be current.
@@ -99,6 +98,12 @@ ogl_import_from_native(struct xrt_image_native *natives,
                        const struct xrt_swapchain_create_info *info,
                        struct ogl_import_results *results)
 {
+#if defined(XRT_OS_ANDROID_USE_AHB)
+	// Function is disabled for AHardwareBuffer, glImportMemoryFdEXT requires an actual FD and requires more work
+	// to handle AHardwareBuffer.
+	return false;
+#endif
+
 	// Setup fields.
 	results->width = info->width;
 	results->height = info->height;
@@ -123,11 +128,19 @@ ogl_import_from_native(struct xrt_image_native *natives,
 		// The below function consumes the handle, need to reference it.
 		xrt_graphics_buffer_handle_t handle = u_graphics_buffer_ref(natives[i].handle);
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+		glImportMemoryWin32HandleEXT(        //
+		    results->memories[i],            //
+		    natives[i].size,                 //
+		    GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, //
+		    (GLint)handle);                  //
+#else
 		glImportMemoryFdEXT(              //
 		    results->memories[i],         //
 		    natives[i].size,              //
 		    GL_HANDLE_TYPE_OPAQUE_FD_EXT, //
 		    (GLint)handle);               //
+#endif
 		CHECK_GL();
 
 		if (info->array_size == 1) {

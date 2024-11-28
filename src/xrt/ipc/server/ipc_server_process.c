@@ -34,7 +34,6 @@
 #include "server/ipc_server_interface.h"
 
 #include <stdlib.h>
-#include <inttypes.h>
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -322,7 +321,7 @@ init_shm(struct ipc_server *s)
 		struct ipc_shared_tracking_origin *itrack = &ism->itracks[count++];
 		memcpy(itrack->name, xtrack->name, sizeof(itrack->name));
 		itrack->type = xtrack->type;
-		itrack->offset = xtrack->offset;
+		itrack->offset = xtrack->initial_offset;
 	}
 
 	ism->itrack_count = count;
@@ -356,6 +355,7 @@ init_shm(struct ipc_server *s)
 		isdev->face_tracking_supported = xdev->face_tracking_supported;
 		isdev->body_tracking_supported = xdev->body_tracking_supported;
 		isdev->stage_supported = xdev->stage_supported;
+		isdev->battery_status_supported = xdev->battery_status_supported;
 
 		// Is this a HMD?
 		if (xdev->hmd != NULL) {

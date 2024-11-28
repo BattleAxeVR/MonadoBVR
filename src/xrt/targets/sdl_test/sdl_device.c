@@ -14,17 +14,17 @@
 #include "util/u_distortion_mesh.h"
 
 
-static void
+static xrt_result_t
 sdl_hmd_get_tracked_pose(struct xrt_device *xdev,
                          enum xrt_input_name name,
-                         uint64_t at_timestamp_ns,
+                         int64_t at_timestamp_ns,
                          struct xrt_space_relation *out_relation)
 {
 	struct sdl_program *sp = from_xdev(xdev);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
-		U_LOG_E("Unknown input name");
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&sp->xdev_base, u_log_get_global_level(), name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
@@ -37,6 +37,8 @@ sdl_hmd_get_tracked_pose(struct xrt_device *xdev,
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT; //
 
 	*out_relation = relation;
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -78,6 +80,7 @@ sdl_device_init(struct sdl_program *sp)
 	// Name and type.
 	xdev->name = XRT_DEVICE_GENERIC_HMD;
 	xdev->device_type = XRT_DEVICE_TYPE_HMD;
+	xdev->hmd->view_count = 2;
 
 	// Print name.
 	snprintf(xdev->str, XRT_DEVICE_NAME_LEN, "SDL HMD");
@@ -120,7 +123,7 @@ sdl_device_init(struct sdl_program *sp)
 	u_distortion_mesh_set_none(xdev);
 
 	// Tracking origin.
-	xdev->tracking_origin->offset = (struct xrt_pose)XRT_POSE_IDENTITY;
+	xdev->tracking_origin->initial_offset = (struct xrt_pose)XRT_POSE_IDENTITY;
 	xdev->tracking_origin->type = XRT_TRACKING_TYPE_OTHER;
 	snprintf(xdev->tracking_origin->name, XRT_TRACKING_NAME_LEN, "SDL Tracking");
 }

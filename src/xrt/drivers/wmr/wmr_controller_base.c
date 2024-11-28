@@ -14,6 +14,7 @@
 
 #include "math/m_mathinclude.h"
 #include "math/m_api.h"
+#include "math/m_clock_tracking.h"
 #include "math/m_vec2.h"
 #include "math/m_predict.h"
 
@@ -124,8 +125,8 @@ wmr_controller_send_fw_cmd(struct wmr_controller_base *wcb,
 	// comms timeout. Replies are usually in 10ms or so but the first can take longer
 	const int timeout_ms = 250;
 	const int timeout_ns = timeout_ms * U_TIME_1MS_IN_NS;
-	uint64_t timeout_start = os_monotonic_get_ns();
-	uint64_t timeout_end_ns = timeout_start + timeout_ns;
+	int64_t timeout_start = os_monotonic_get_ns();
+	int64_t timeout_end_ns = timeout_start + timeout_ns;
 
 	if (!wmr_controller_send_bytes(wcb, fw_cmd->buf, sizeof(fw_cmd->buf))) {
 		return -1;
@@ -442,10 +443,10 @@ read_controller_config(struct wmr_controller_base *wcb)
 	return true;
 }
 
-static void
+static xrt_result_t
 wmr_controller_base_get_tracked_pose(struct xrt_device *xdev,
                                      enum xrt_input_name name,
-                                     uint64_t at_timestamp_ns,
+                                     int64_t at_timestamp_ns,
                                      struct xrt_space_relation *out_relation)
 {
 	DRV_TRACE_MARKER();
@@ -453,7 +454,7 @@ wmr_controller_base_get_tracked_pose(struct xrt_device *xdev,
 	struct wmr_controller_base *wcb = wmr_controller_base(xdev);
 
 	// Variables needed for prediction.
-	uint64_t last_imu_timestamp_ns = 0;
+	int64_t last_imu_timestamp_ns = 0;
 	struct xrt_space_relation relation = {0};
 	relation.relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
@@ -478,13 +479,15 @@ wmr_controller_base_get_tracked_pose(struct xrt_device *xdev,
 	// No prediction needed.
 	if (at_timestamp_ns < last_imu_timestamp_ns) {
 		*out_relation = relation;
-		return;
+		return XRT_SUCCESS;
 	}
 
-	uint64_t prediction_ns = at_timestamp_ns - last_imu_timestamp_ns;
+	int64_t prediction_ns = at_timestamp_ns - last_imu_timestamp_ns;
 	double prediction_s = time_ns_to_s(prediction_ns);
 
 	m_predict_relation(&relation, prediction_s, out_relation);
+
+	return XRT_SUCCESS;
 }
 
 void

@@ -26,7 +26,6 @@
 #include <stdio.h>
 #include <assert.h>
 
-
 #define QWERTY_HMD_INITIAL_MOVEMENT_SPEED 0.002f // in meters per frame
 #define QWERTY_HMD_INITIAL_LOOK_SPEED 0.02f      // in radians per frame
 #define QWERTY_CONTROLLER_INITIAL_MOVEMENT_SPEED 0.005f
@@ -104,12 +103,10 @@ qwerty_controller(struct xrt_device *xd)
 	return qc;
 }
 
-static void
+static xrt_result_t
 qwerty_update_inputs(struct xrt_device *xd)
 {
-	if (xd->name != XRT_DEVICE_SIMPLE_CONTROLLER) {
-		return;
-	}
+	assert(xd->name == XRT_DEVICE_SIMPLE_CONTROLLER);
 
 	struct qwerty_controller *qc = qwerty_controller(xd);
 	struct qwerty_device *qd = &qc->base;
@@ -120,6 +117,8 @@ qwerty_update_inputs(struct xrt_device *xd)
 	xd->inputs[QWERTY_SELECT].timestamp = qc->select_timestamp;
 	xd->inputs[QWERTY_MENU].value.boolean = qc->menu_clicked;
 	xd->inputs[QWERTY_MENU].timestamp = qc->menu_timestamp;
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -132,23 +131,23 @@ qwerty_set_output(struct xrt_device *xd, enum xrt_output_name name, const union 
 	if (amplitude || duration || frequency) {
 		QWERTY_INFO(qd,
 		            "[%s] Haptic output: \n"
-		            "\tfrequency=%.2f amplitude=%.2f duration=%ld",
+		            "\tfrequency=%.2f amplitude=%.2f duration=%" PRId64,
 		            xd->str, frequency, amplitude, duration);
 	}
 }
 
-static void
+static xrt_result_t
 qwerty_get_tracked_pose(struct xrt_device *xd,
                         enum xrt_input_name name,
-                        uint64_t at_timestamp_ns,
+                        int64_t at_timestamp_ns,
                         struct xrt_space_relation *out_relation)
 {
 	struct qwerty_device *qd = qwerty_device(xd);
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE && name != XRT_INPUT_SIMPLE_GRIP_POSE &&
 	    name != XRT_INPUT_SIMPLE_AIM_POSE) {
-		QWERTY_ERROR(qd, "Unexpected input name = 0x%04X", name >> 8);
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&qd->base, qd->sys->log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	// Position
@@ -202,6 +201,8 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 	out_relation->relation_flags =
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -259,7 +260,7 @@ qwerty_hmd_create(void)
 
 	xd->inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 
-	xd->update_inputs = qwerty_update_inputs;
+	xd->update_inputs = u_device_noop_update_inputs;
 	xd->get_tracked_pose = qwerty_get_tracked_pose;
 	xd->get_view_poses = u_device_get_view_poses;
 	xd->destroy = qwerty_destroy;

@@ -33,7 +33,7 @@
 #define IPC_MAX_VIEWS 8    // max views we will return configs for
 #define IPC_MAX_FORMATS 32 // max formats our server-side compositor supports
 #define IPC_MAX_DEVICES 8  // max number of devices we will map using shared mem
-#define IPC_MAX_LAYERS 16
+#define IPC_MAX_LAYERS XRT_MAX_LAYERS
 #define IPC_MAX_SLOTS 128
 #define IPC_MAX_CLIENTS 8
 #define IPC_MAX_RAW_VIEWS 32 // Max views that we can get, artificial limit.
@@ -137,6 +137,7 @@ struct ipc_shared_device
 	bool force_feedback_supported;
 	bool form_factor_check_supported;
 	bool stage_supported;
+	bool battery_status_supported;
 };
 
 /*!
@@ -287,7 +288,7 @@ struct ipc_shared_memory
 struct ipc_client_description
 {
 	pid_t pid;
-	struct xrt_instance_info info;
+	struct xrt_application_info info;
 };
 
 struct ipc_client_list
@@ -314,7 +315,7 @@ struct ipc_app_state
 	bool io_active;
 	uint32_t z_order;
 	pid_t pid;
-	struct xrt_instance_info info;
+	struct xrt_application_info info;
 };
 
 

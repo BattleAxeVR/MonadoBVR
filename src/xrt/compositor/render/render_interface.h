@@ -53,9 +53,9 @@ extern "C" {
 
 /*!
  * Max number of layers for layer squasher, can be different from
- * @ref COMP_MAX_LAYERS as the render module is separate from the compositor.
+ * @ref XRT_MAX_LAYERS as the render module is separate from the compositor.
  */
-#define RENDER_MAX_LAYERS (16)
+#define RENDER_MAX_LAYERS (XRT_MAX_LAYERS)
 
 /*!
  * Max number of images that can be given at a single time to the layer
@@ -658,7 +658,7 @@ bool
 render_scratch_images_ensure(struct render_resources *r, struct render_scratch_images *rsi, VkExtent2D extent);
 
 /*!
- * Close all resources on the given @ref render_scatch_images.
+ * Close all resources on the given @ref render_scratch_images.
  */
 void
 render_scratch_images_close(struct render_resources *r, struct render_scratch_images *rsi);
@@ -768,6 +768,8 @@ render_gfx_render_pass_close(struct render_gfx_render_pass *rgrp);
  * (@ref render_gfx_target_resources), the target points to one render pass and
  * it's pipelines (@ref render_gfx_render_pass). It is up to the code using
  * these to do reuse of render passes and ensure they match.
+ *
+ * @see comp_render_gfx
  */
 struct render_gfx_target_resources
 {
@@ -814,6 +816,8 @@ render_gfx_target_resources_close(struct render_gfx_target_resources *rtr);
 /*!
  * A rendering is used to create command buffers needed to do one frame of
  * compositor rendering, it holds onto resources used by the command buffer.
+ *
+ * @see comp_render_gfx
  */
 struct render_gfx
 {
@@ -858,7 +862,7 @@ render_gfx_end(struct render_gfx *rr);
  * @public @memberof render_gfx
  */
 void
-render_gfx_close(struct render_gfx *rr);
+render_gfx_fini(struct render_gfx *rr);
 
 
 /*
@@ -1095,6 +1099,8 @@ render_gfx_layer_quad(struct render_gfx *rr, bool premultiplied_alpha, VkDescrip
  * A compute rendering is used to create command buffers needed to do one frame
  * of compositor rendering using compute shaders, it holds onto resources used
  * by the command buffer.
+ *
+ * @see comp_render_cs
  */
 struct render_compute
 {
@@ -1243,7 +1249,7 @@ render_compute_init(struct render_compute *crc, struct render_resources *r);
  * @public @memberof render_compute
  */
 void
-render_compute_close(struct render_compute *crc);
+render_compute_fini(struct render_compute *crc);
 
 /*!
  * Begin the compute command buffer building, takes the vk_bundle's pool lock

@@ -67,6 +67,18 @@ common_shutdown(volatile struct ipc_client_state *ics)
 		xrt_space_reference((struct xrt_space **)&ics->xspcs[i], NULL);
 	}
 
+	if (ics->local_space_overseer_index < IPC_MAX_CLIENT_SPACES) {
+		xrt_space_reference((struct xrt_space **)&ics->server->xso->localspace[ics->local_space_overseer_index],
+		                    NULL);
+	}
+
+	if (ics->local_floor_space_overseer_index < IPC_MAX_CLIENT_SPACES && //
+	    ics->local_floor_space_overseer_index > 0) {
+		xrt_space_reference(
+		    (struct xrt_space **)&ics->server->xso->localfloorspace[ics->local_floor_space_overseer_index],
+		    NULL);
+	}
+
 	// Mark an still in use reference spaces as no longer used.
 	for (uint32_t i = 0; i < ARRAY_SIZE(ics->ref_space_used); i++) {
 		bool used = ics->ref_space_used[i];
@@ -76,6 +88,17 @@ common_shutdown(volatile struct ipc_client_state *ics)
 
 		xrt_space_overseer_ref_space_dec(ics->server->xso, (enum xrt_reference_space_type)i);
 		ics->ref_space_used[i] = false;
+	}
+
+	// Make a still in use device features as no longer used.
+	for (uint32_t i = 0; i < ARRAY_SIZE(ics->device_feature_used); i++) {
+		bool used = ics->device_feature_used[i];
+		if (!used) {
+			continue;
+		}
+
+		xrt_system_devices_feature_dec(ics->server->xsysd, (enum xrt_device_feature_type)i);
+		ics->device_feature_used[i] = false;
 	}
 
 	// Should we stop the server when a client disconnects?

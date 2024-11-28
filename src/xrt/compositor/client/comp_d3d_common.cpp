@@ -13,7 +13,6 @@
 #include "util/u_logging.h"
 #include "util/u_time.h"
 
-#include <inttypes.h>
 
 
 #define D3D_COMMON_SPEW(log_level, ...) U_LOG_IFL_T(log_level, __VA_ARGS__);
@@ -27,14 +26,6 @@
 #define D3D_COMMON_ERROR(log_level, ...) U_LOG_IFL_E(log_level, __VA_ARGS__);
 
 namespace xrt::compositor::client {
-
-// xrt_result_t
-// importFromHandleDuplicates(xrt_compositor_native &xcn,
-//                            std::vector<wil::unique_handle> const &handles,
-//                            const xrt_swapchain_create_info &vkinfo,
-//                            bool use_dedicated_allocation,
-//                            unique_swapchain_ref &out_xsc)
-
 
 static inline DWORD
 convertTimeoutToWindowsMilliseconds(uint64_t timeout_ns)

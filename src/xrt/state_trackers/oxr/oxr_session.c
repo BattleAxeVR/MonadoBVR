@@ -9,6 +9,7 @@
  * @ingroup oxr_main
  */
 
+#include "oxr_frame_sync.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_session.h"
 #include "xrt/xrt_config_build.h" // IWYU pragma: keep
@@ -49,7 +50,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <inttypes.h>
 
 
 DEBUG_GET_ONCE_NUM_OPTION(ipd, "OXR_DEBUG_IPD_MM", 63)
@@ -206,6 +206,14 @@ oxr_session_enumerate_formats(struct oxr_logger *log,
 XrResult
 oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSessionBeginInfo *beginInfo)
 {
+	/*
+	 * If the session is not running when the application calls xrBeginSession, but the session is not yet in the
+	 * XR_SESSION_STATE_READY state, the runtime must return error XR_ERROR_SESSION_NOT_READY.
+	 */
+	if (sess->state != XR_SESSION_STATE_READY) {
+		return oxr_error(log, XR_ERROR_SESSION_NOT_READY, "Session is not ready to begin");
+	}
+
 	struct xrt_compositor *xc = sess->compositor;
 	if (xc != NULL) {
 		XrViewConfigurationType view_type = beginInfo->primaryViewConfigurationType;
@@ -224,7 +232,9 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 
 		const struct xrt_begin_session_info begin_session_info = {
 		    .view_type = (enum xrt_view_type)beginInfo->primaryViewConfigurationType,
+#ifdef OXR_HAVE_EXT_hand_tracking
 		    .ext_hand_tracking_enabled = extensions->EXT_hand_tracking,
+#endif
 #ifdef OXR_HAVE_EXT_eye_gaze_interaction
 		    .ext_eye_gaze_interaction_enabled = extensions->EXT_eye_gaze_interaction,
 #endif
@@ -236,6 +246,9 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 #endif
 #ifdef OXR_HAVE_FB_body_tracking
 		    .fb_body_tracking_enabled = extensions->FB_body_tracking,
+#endif
+#ifdef OXR_HAVE_FB_face_tracking2
+		    .fb_face_tracking2_enabled = extensions->FB_face_tracking2,
 #endif
 		};
 
@@ -251,8 +264,11 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 		oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, 0);
 		oxr_session_change_state(log, sess, XR_SESSION_STATE_FOCUSED, 0);
 	}
-
-	sess->has_begun = true;
+	XrResult ret = oxr_frame_sync_begin_session(&sess->frame_sync);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret,
+		                 "Frame sync object refused to let us begin session, probably already running");
+	}
 
 	return oxr_session_success_result(sess);
 }
@@ -265,11 +281,23 @@ oxr_session_end(struct oxr_logger *log, struct oxr_session *sess)
 		return XR_SUCCESS;
 	}
 
-	struct xrt_compositor *xc = sess->compositor;
+	/*
+	 * If the session is not running when the application calls xrEndSession, the runtime must return
+	 * error XR_ERROR_SESSION_NOT_RUNNING
+	 */
+	if (!oxr_frame_sync_is_session_running(&sess->frame_sync)) {
+		return oxr_error(log, XR_ERROR_SESSION_NOT_RUNNING, "Session is not running");
+	}
+
+	/*
+	 * If the session is still running when the application calls xrEndSession, but the session is not yet in
+	 * the XR_SESSION_STATE_STOPPING state, the runtime must return error XR_ERROR_SESSION_NOT_STOPPING.
+	 */
 	if (sess->state != XR_SESSION_STATE_STOPPING) {
 		return oxr_error(log, XR_ERROR_SESSION_NOT_STOPPING, "Session is not stopping");
 	}
 
+	struct xrt_compositor *xc = sess->compositor;
 	if (xc != NULL) {
 		if (sess->frame_id.waited > 0) {
 			xrt_comp_discard_frame(xc, sess->frame_id.waited);
@@ -293,10 +321,20 @@ oxr_session_end(struct oxr_logger *log, struct oxr_session *sess)
 	if (sess->exiting) {
 		oxr_session_change_state(log, sess, XR_SESSION_STATE_EXITING, 0);
 	} else {
+#ifndef XRT_OS_ANDROID
+		// @todo In multi-clients scenario with a session being reused, changing session
+		//       state to XR_SESSION_STATE_READY would cause application to call xrBeginSession
+		//       immediately and this is not desired. On Android platform, runtime would
+		//       change session state to XR_SESSION_STATE_READY once application goes to
+		//       foreground again. But on other platform it's not handled yet.
 		oxr_session_change_state(log, sess, XR_SESSION_STATE_READY, 0);
+#endif // !XRT_OS_ANDROID
 	}
-
-	sess->has_begun = false;
+	XrResult ret = oxr_frame_sync_end_session(&sess->frame_sync);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret, "Frame sync object refused to let us end session, probably not running");
+	}
+	sess->has_ended_once = false;
 
 	return oxr_session_success_result(sess);
 }
@@ -352,6 +390,36 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 	if (xs == NULL) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "xrt_session is null");
 	}
+
+#ifdef XRT_OS_ANDROID
+	// Most recent Android activity lifecycle event was OnPause: move toward stopping
+	if (sess->sys->inst->activity_state == XRT_ANDROID_LIVECYCLE_EVENT_ON_PAUSE) {
+		if (sess->state == XR_SESSION_STATE_FOCUSED) {
+			U_LOG_I("Activity paused: changing session state FOCUSED->VISIBLE");
+			oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, 0);
+		}
+
+		if (sess->state == XR_SESSION_STATE_VISIBLE) {
+			U_LOG_I("Activity paused: changing session state VISIBLE->SYNCHRONIZED");
+			oxr_session_change_state(log, sess, XR_SESSION_STATE_SYNCHRONIZED, 0);
+		}
+
+		if (sess->state == XR_SESSION_STATE_SYNCHRONIZED) {
+			U_LOG_I("Activity paused: changing session state SYNCHRONIZED->STOPPING");
+			oxr_session_change_state(log, sess, XR_SESSION_STATE_STOPPING, 0);
+		}
+		// TODO return here to avoid polling other events?
+		// see https://gitlab.freedesktop.org/monado/monado/-/issues/419
+	}
+
+	// Most recent Android activity lifecycle event was OnResume: move toward ready
+	if (sess->sys->inst->activity_state == XRT_ANDROID_LIVECYCLE_EVENT_ON_RESUME) {
+		if (sess->state == XR_SESSION_STATE_IDLE) {
+			U_LOG_I("Activity resumed: changing session state IDLE->READY");
+			oxr_session_change_state(log, sess, XR_SESSION_STATE_READY, 0);
+		}
+	}
+#endif // XRT_OS_ANDROID
 
 	bool read_more_events = true;
 	while (read_more_events) {
@@ -451,6 +519,28 @@ xrt_to_view_state_flags(enum xrt_space_relation_flags flags)
 		res |= XR_VIEW_STATE_POSITION_TRACKED_BIT;
 	}
 	return res;
+}
+
+static void
+adjust_fov(const struct xrt_fov *original_fov, const struct xrt_quat *original_rotation, struct xrt_fov *adjusted_fov)
+{
+	struct xrt_quat identity = XRT_QUAT_IDENTITY;
+
+	struct xrt_quat original_rotation_inv;
+	math_quat_invert(original_rotation, &original_rotation_inv);
+
+	struct xrt_quat rotation_diff;
+	math_quat_rotate(&original_rotation_inv, &identity, &rotation_diff);
+
+	struct xrt_vec3 euler_angles;
+	math_quat_to_euler_angles(&rotation_diff, &euler_angles);
+
+	*adjusted_fov = (struct xrt_fov){
+	    .angle_left = original_fov->angle_left + euler_angles.y,
+	    .angle_right = original_fov->angle_right + euler_angles.y,
+	    .angle_up = original_fov->angle_up + euler_angles.x,
+	    .angle_down = original_fov->angle_down + euler_angles.x,
+	};
 }
 
 XrResult
@@ -554,7 +644,11 @@ oxr_session_locate_views(struct oxr_logger *log,
 		 * Pose
 		 */
 
-		const struct xrt_pose view_pose = poses[i];
+		struct xrt_pose view_pose = poses[i];
+
+		if (sess->sys->inst->quirks.parallel_views) {
+			view_pose.orientation = (struct xrt_quat)XRT_QUAT_IDENTITY;
+		}
 
 		// Do the magical space relation dance here.
 		struct xrt_space_relation result = {0};
@@ -569,7 +663,12 @@ oxr_session_locate_views(struct oxr_logger *log,
 		 * Fov
 		 */
 
-		const struct xrt_fov fov = fovs[i];
+		struct xrt_fov fov = fovs[i];
+
+		if (sess->sys->inst->quirks.parallel_views) {
+			adjust_fov(&fovs[i], &poses[i].orientation, &fov);
+		}
+
 		OXR_XRT_FOV_TO_XRFOVF(fov, views[i].fov);
 
 
@@ -635,15 +734,15 @@ static XrResult
 do_wait_frame_and_checks(struct oxr_logger *log,
                          struct oxr_session *sess,
                          int64_t *out_frame_id,
-                         uint64_t *out_predicted_display_time,
-                         uint64_t *out_predicted_display_period,
+                         int64_t *out_predicted_display_time,
+                         int64_t *out_predicted_display_period,
                          XrTime *out_converted_time)
 {
 	assert(sess->compositor != NULL);
 
 	int64_t frame_id = -1;
-	uint64_t predicted_display_time = 0;
-	uint64_t predicted_display_period = 0;
+	int64_t predicted_display_time = 0;
+	int64_t predicted_display_period = 0;
 
 	xrt_result_t xret = xrt_comp_wait_frame( //
 	    sess->compositor,                    // compositor
@@ -698,28 +797,34 @@ oxr_session_frame_wait(struct oxr_logger *log, struct oxr_session *sess, XrFrame
 	 * multiple threads. We do this before so we call predicted after any
 	 * waiting for xrBeginFrame has happened, for better timing information.
 	 */
-	os_semaphore_wait(&sess->sem, 0);
+	XrResult ret = oxr_frame_sync_wait_frame(&sess->frame_sync);
+	if (XR_SUCCESS != ret) {
+		// session not running
+		return ret;
+	}
 
 	if (sess->frame_timing_spew) {
 		oxr_log(log, "Finished waiting for previous frame begin at %8.3fms", ts_ms(sess));
 	}
 
 	int64_t frame_id = -1;
-	uint64_t predicted_display_time = 0;
-	uint64_t predicted_display_period = 0;
+	int64_t predicted_display_time = 0;
+	int64_t predicted_display_period = 0;
 	XrTime converted_time = 0;
 
-	XrResult ret = do_wait_frame_and_checks( //
-	    log,                                 // log
-	    sess,                                // sess
-	    &frame_id,                           // out_frame_id
-	    &predicted_display_time,             // out_predicted_display_time
-	    &predicted_display_period,           // out_predicted_display_period
-	    &converted_time);                    // out_converted_time
+	ret = do_wait_frame_and_checks( //
+	    log,                        // log
+	    sess,                       // sess
+	    &frame_id,                  // out_frame_id
+	    &predicted_display_time,    // out_predicted_display_time
+	    &predicted_display_period,  // out_predicted_display_period
+	    &converted_time);           // out_converted_time
 	if (ret != XR_SUCCESS) {
 		// On error we need to release the semaphore ourselves as xrBeginFrame won't do it.
-		os_semaphore_release(&sess->sem);
-
+		// Should not get an error.
+		XrResult release_ret = oxr_frame_sync_release(&sess->frame_sync);
+		assert(release_ret == XR_SUCCESS);
+		(void)release_ret;
 		// Error already logged.
 		return ret;
 	}
@@ -751,7 +856,7 @@ oxr_session_frame_wait(struct oxr_logger *log, struct oxr_session *sess, XrFrame
 	}
 
 	if (sess->frame_timing_wait_sleep_ms > 0) {
-		uint64_t sleep_ns = U_TIME_1MS_IN_NS * sess->frame_timing_wait_sleep_ms;
+		int64_t sleep_ns = U_TIME_1MS_IN_NS * sess->frame_timing_wait_sleep_ms;
 		os_precise_sleeper_nanosleep(&sess->sleeper, sleep_ns);
 	}
 
@@ -801,7 +906,12 @@ oxr_session_frame_begin(struct oxr_logger *log, struct oxr_session *sess)
 		sess->frame_id.waited = -1;
 	}
 
-	os_semaphore_release(&sess->sem);
+	// beginFrame is about to succeed, we can release an xrWaitFrame, if available.
+	XrResult osh_ret = oxr_frame_sync_release(&sess->frame_sync);
+	if (XR_SUCCESS != osh_ret) {
+		// session not running
+		return osh_ret;
+	}
 
 	return ret;
 }
@@ -834,7 +944,7 @@ oxr_session_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	xrt_session_destroy(&sess->xs);
 
 	os_precise_sleeper_deinit(&sess->sleeper);
-	os_semaphore_destroy(&sess->sem);
+	oxr_frame_sync_fini(&sess->frame_sync);
 	os_mutex_destroy(&sess->active_wait_frames_lock);
 
 	free(sess);
@@ -857,8 +967,8 @@ oxr_session_allocate_and_init(struct oxr_logger *log,
 	// What system is this session based on.
 	sess->sys = sys;
 
-	// Init the begin/wait frame semaphore and related fields.
-	os_semaphore_init(&sess->sem, 1);
+	// Init the begin/wait frame handler.
+	oxr_frame_sync_init(&sess->frame_sync);
 
 	// Init the wait frame precise sleeper.
 	os_precise_sleeper_init(&sess->sleeper);
@@ -1419,7 +1529,7 @@ oxr_session_get_visibility_mask(struct oxr_logger *log,
 	// If we didn't have any cached mask get it.
 	if (mask == NULL) {
 		xret = xrt_device_get_visibility_mask(xdev, type, viewIndex, &mask);
-		if (xret == XRT_ERROR_DEVICE_FUNCTION_NOT_IMPLEMENTED && xdev->hmd != NULL) {
+		if (xret == XRT_ERROR_NOT_IMPLEMENTED && xdev->hmd != NULL) {
 			const struct xrt_fov fov = xdev->hmd->distortion.fov[viewIndex];
 			u_visibility_mask_get_default(type, &fov, &mask);
 			xret = XRT_SUCCESS;

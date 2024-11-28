@@ -32,6 +32,8 @@ add_library(
 	oxr_dpad.c
 	oxr_event.c
 	oxr_extension_support.h
+	oxr_frame_sync.c
+	oxr_frame_sync.h
 	oxr_handle_base.c
 	oxr_input.c
 	oxr_input_transform.c
@@ -98,7 +100,7 @@ if(WIN32 AND XRT_HAVE_OPENGL)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_gl_win32.c)
 endif()
 
-if(XRT_FEATURE_OPENXR_LAYER_PASSTHROUGH)
+if(XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH)
 	target_sources(st_oxr PRIVATE oxr_api_passthrough.c oxr_passthrough.c)
 endif()
 
@@ -108,6 +110,10 @@ endif()
 
 if(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC)
 	target_sources(st_oxr PRIVATE oxr_api_face_tracking.c oxr_face_tracking.c)
+endif()
+
+if(XRT_FEATURE_OPENXR_FACE_TRACKING2_FB)
+	target_sources(st_oxr PRIVATE oxr_api_face_tracking2_fb.c oxr_face_tracking2_fb.c)
 endif()
 
 target_link_libraries(

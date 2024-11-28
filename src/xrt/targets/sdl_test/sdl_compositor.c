@@ -76,6 +76,10 @@ static const char *required_device_extensions[] = {
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
     VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+    VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+    VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
     VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -253,7 +257,7 @@ compositor_init_sys_info(struct sdl_compositor *c, struct sdl_program *sp, struc
 	struct xrt_system_compositor_info *sys_info = &c->sys_info;
 
 	// Required by OpenXR spec.
-	sys_info->max_layers = 16;
+	sys_info->max_layers = XRT_MAX_LAYERS;
 
 	// UUIDs and LUID already set in vk init.
 	(void)sys_info->compositor_vk_deviceUUID;
@@ -343,10 +347,10 @@ sdl_compositor_end_session(struct xrt_compositor *xc)
 static xrt_result_t
 sdl_compositor_predict_frame(struct xrt_compositor *xc,
                              int64_t *out_frame_id,
-                             uint64_t *out_wake_time_ns,
-                             uint64_t *out_predicted_gpu_time_ns,
-                             uint64_t *out_predicted_display_time_ns,
-                             uint64_t *out_predicted_display_period_ns)
+                             int64_t *out_wake_time_ns,
+                             int64_t *out_predicted_gpu_time_ns,
+                             int64_t *out_predicted_display_time_ns,
+                             int64_t *out_predicted_display_period_ns)
 {
 	COMP_TRACE_MARKER();
 
@@ -354,10 +358,10 @@ sdl_compositor_predict_frame(struct xrt_compositor *xc,
 
 	SC_TRACE(c, "PREDICT_FRAME");
 
-	uint64_t now_ns = os_monotonic_get_ns();
-	uint64_t null_desired_present_time_ns = 0;
-	uint64_t null_present_slop_ns = 0;
-	uint64_t null_min_display_period_ns = 0;
+	int64_t now_ns = os_monotonic_get_ns();
+	int64_t null_desired_present_time_ns = 0;
+	int64_t null_present_slop_ns = 0;
+	int64_t null_min_display_period_ns = 0;
 
 	u_pc_predict(                        //
 	    c->upc,                          // upc
@@ -377,7 +381,7 @@ static xrt_result_t
 sdl_compositor_mark_frame(struct xrt_compositor *xc,
                           int64_t frame_id,
                           enum xrt_compositor_frame_point point,
-                          uint64_t when_ns)
+                          int64_t when_ns)
 {
 	COMP_TRACE_MARKER();
 
@@ -429,7 +433,7 @@ sdl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 
 	struct sdl_program *sp = from_comp(xc);
 	struct sdl_compositor *c = &sp->c;
-	int64_t frame_id = c->base.slot.data.frame_id;
+	int64_t frame_id = c->base.layer_accum.data.frame_id;
 
 	SC_TRACE(c, "LAYER_COMMIT");
 
@@ -448,7 +452,7 @@ sdl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 
 	// When we begin rendering.
 	{
-		uint64_t now_ns = os_monotonic_get_ns();
+		int64_t now_ns = os_monotonic_get_ns();
 		u_pc_mark_point(c->upc, U_TIMING_POINT_BEGIN, frame_id, now_ns);
 	}
 
@@ -457,7 +461,7 @@ sdl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 
 	// When we are submitting to the GPU.
 	{
-		uint64_t now_ns = os_monotonic_get_ns();
+		int64_t now_ns = os_monotonic_get_ns();
 		u_pc_mark_point(c->upc, U_TIMING_POINT_SUBMIT_BEGIN, frame_id, now_ns);
 
 		now_ns = os_monotonic_get_ns();
@@ -518,14 +522,16 @@ sdl_compositor_init(struct sdl_program *sp)
 
 	struct sdl_compositor *c = &sp->c;
 
-	c->base.base.base.begin_session = sdl_compositor_begin_session;
-	c->base.base.base.end_session = sdl_compositor_end_session;
-	c->base.base.base.predict_frame = sdl_compositor_predict_frame;
-	c->base.base.base.mark_frame = sdl_compositor_mark_frame;
-	c->base.base.base.begin_frame = sdl_compositor_begin_frame;
-	c->base.base.base.discard_frame = sdl_compositor_discard_frame;
-	c->base.base.base.layer_commit = sdl_compositor_layer_commit;
-	c->base.base.base.destroy = sdl_compositor_destroy;
+	struct xrt_compositor *iface = &c->base.base.base;
+
+	iface->begin_session = sdl_compositor_begin_session;
+	iface->end_session = sdl_compositor_end_session;
+	iface->predict_frame = sdl_compositor_predict_frame;
+	iface->mark_frame = sdl_compositor_mark_frame;
+	iface->begin_frame = sdl_compositor_begin_frame;
+	iface->discard_frame = sdl_compositor_discard_frame;
+	iface->layer_commit = sdl_compositor_layer_commit;
+	iface->destroy = sdl_compositor_destroy;
 	c->base.vk.log_level = log_level;
 	c->frame.waited.id = -1;
 	c->frame.rendering.id = -1;
@@ -537,8 +543,8 @@ sdl_compositor_init(struct sdl_program *sp)
 	comp_base_init(&c->base);
 
 	// Override some comp_base functions.
-	c->base.base.base.create_swapchain = sdl_swapchain_create;
-	c->base.base.base.import_swapchain = sdl_swapchain_import;
+	iface->create_swapchain = sdl_swapchain_create;
+	iface->import_swapchain = sdl_swapchain_import;
 
 
 	/*

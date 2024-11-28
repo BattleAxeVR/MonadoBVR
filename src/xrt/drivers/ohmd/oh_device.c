@@ -85,6 +85,12 @@ enum input_indices
 // one mapping for each of enum ohmd_control_hint
 #define CONTROL_MAPPING_SIZE 16
 
+// Default haptic frequency for when the driver needs to decide frequency.
+#if defined(OHMD_HAVE_HAPTICS_API_v0)
+#define DEFAULT_HAPTIC_FREQ 160.0
+#endif
+
+
 // generic controllers are mapped to the khronos simple profile
 // touch controllers input mappings are special cased
 enum openhmd_device_type
@@ -294,13 +300,13 @@ update_ohmd_controller(struct oh_device *ohd, int control_count, float *control_
 	}
 }
 
-static void
+static xrt_result_t
 oh_device_update_inputs(struct xrt_device *xdev)
 {
 	struct oh_device *ohd = oh_device(xdev);
 
 	int control_count;
-	float control_state[256];
+	float control_state[256] = {0};
 
 	ohmd_device_geti(ohd->dev, OHMD_CONTROL_COUNT, &control_count);
 	if (control_count > 64)
@@ -316,15 +322,32 @@ oh_device_update_inputs(struct xrt_device *xdev)
 	for (int i = 0; i < 256; i++) {
 		ohd->last_control_state[i] = control_state[i];
 	}
+
+	return XRT_SUCCESS;
 }
 
 static void
 oh_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const union xrt_output_value *value)
 {
 	struct oh_device *ohd = oh_device(xdev);
-	(void)ohd;
 
-	//! @todo OpenHMD haptic API not finished
+#if defined(OHMD_HAVE_HAPTICS_API_v0)
+	// Use the unofficial Haptics API from thaytan's fork of OpenHMD:
+	// https://github.com/thaytan/OpenHMD/blob/rift-room-config/include/openhmd.h#L481
+
+	float frequency = value->vibration.frequency;
+
+	// A frequency of 0.0f from OpenXR means to let the driver decide.
+	if (frequency == XRT_FREQUENCY_UNSPECIFIED) {
+		frequency = DEFAULT_HAPTIC_FREQ;
+	}
+
+	ohmd_device_set_haptics_on(ohd->dev, (float)value->vibration.duration_ns / 1e9f, frequency,
+	                           value->vibration.amplitude);
+#else
+	// There is no official OpenHMD Haptic API.
+	(void)ohd;
+#endif
 }
 
 static bool
@@ -350,10 +373,10 @@ check_tracker_pose(struct oh_device *ohd, enum xrt_input_name name)
 	return (ohd->ohmd_device_type == OPENHMD_GENERIC_TRACKER) && name == XRT_INPUT_GENERIC_TRACKER_POSE;
 }
 
-static void
+static xrt_result_t
 oh_device_get_tracked_pose(struct xrt_device *xdev,
                            enum xrt_input_name name,
-                           uint64_t at_timestamp_ns,
+                           int64_t at_timestamp_ns,
                            struct xrt_space_relation *out_relation)
 {
 	struct oh_device *ohd = oh_device(xdev);
@@ -361,8 +384,8 @@ oh_device_get_tracked_pose(struct xrt_device *xdev,
 	struct xrt_vec3 pos = XRT_VEC3_ZERO;
 
 	if (!check_head_pose(ohd, name) && !check_controller_pose(ohd, name) && !check_tracker_pose(ohd, name)) {
-		OHMD_ERROR(ohd, "unknown input name: %d", name);
-		return;
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&ohd->base, ohd->log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
 	ohmd_ctx_update(ohd->ctx);
@@ -406,7 +429,7 @@ oh_device_get_tracked_pose(struct xrt_device *xdev,
 		 */
 		*out_relation = ohd->last_relation;
 		OHMD_TRACE(ohd, "GET_TRACKED_POSE (%s) - no new data", ohd->base.str);
-		return;
+		return XRT_SUCCESS;
 	}
 
 	/*!
@@ -447,6 +470,8 @@ oh_device_get_tracked_pose(struct xrt_device *xdev,
 	// Update state within driver
 	ohd->last_update = (int64_t)now;
 	ohd->last_relation = *out_relation;
+
+	return XRT_SUCCESS;
 }
 
 
@@ -1233,7 +1258,7 @@ oh_device_create(ohmd_context *ctx, bool no_hmds, struct xrt_device **out_xdevs)
 	//! @todo: support mix of 3dof and 6dof OpenHMD devices
 	struct oh_system *sys = U_TYPED_CALLOC(struct oh_system);
 	sys->base.type = XRT_TRACKING_TYPE_NONE;
-	sys->base.offset.orientation.w = 1.0f;
+	sys->base.initial_offset.orientation.w = 1.0f;
 
 	u_var_add_root(sys, "OpenHMD Wrapper", false);
 

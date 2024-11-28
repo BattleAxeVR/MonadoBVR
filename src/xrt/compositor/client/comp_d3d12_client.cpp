@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,6 +6,7 @@
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Fernando Velazquez Innella <finnella@magicleap.com>
+ * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup comp_client
  */
 
@@ -37,7 +38,6 @@
 #include <wil/result_macros.h>
 
 #include <assert.h>
-#include <inttypes.h>
 #include <memory>
 #include <stdio.h>
 #include <stdlib.h>
@@ -164,9 +164,9 @@ static_assert(std::is_standard_layout<client_d3d12_compositor>::value);
 struct client_d3d12_swapchain;
 
 static inline DWORD
-convertTimeoutToWindowsMilliseconds(uint64_t timeout_ns)
+convertTimeoutToWindowsMilliseconds(int64_t timeout_ns)
 {
-	return (timeout_ns == XRT_INFINITE_DURATION) ? INFINITE : (DWORD)(timeout_ns / (uint64_t)U_TIME_1MS_IN_NS);
+	return (timeout_ns == XRT_INFINITE_DURATION) ? INFINITE : (DWORD)(timeout_ns / (int64_t)U_TIME_1MS_IN_NS);
 }
 
 static inline bool
@@ -378,7 +378,7 @@ client_d3d12_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_in
 }
 
 static xrt_result_t
-client_d3d12_swapchain_wait_image(struct xrt_swapchain *xsc, uint64_t timeout_ns, uint32_t index)
+client_d3d12_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index)
 {
 	struct client_d3d12_swapchain *sc = as_client_d3d12_swapchain(xsc);
 
@@ -495,6 +495,7 @@ try {
 	std::unique_ptr<struct client_d3d12_swapchain> sc = std::make_unique<struct client_d3d12_swapchain>();
 	sc->data = std::make_unique<client_d3d12_swapchain_data>(c->log_level);
 	auto &data = sc->data;
+	std::uint64_t image_mem_size = 0;
 
 	// Allocate images
 	xret = xrt::auxiliary::d3d::d3d12::allocateSharedImages( //
@@ -502,7 +503,8 @@ try {
 	    xinfo,                                               //
 	    image_count,                                         //
 	    data->images,                                        //
-	    data->handles);                                      //
+	    data->handles,                                       //
+	    image_mem_size);                                     //
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -598,7 +600,8 @@ try {
 		    xinfo,                                               // xsci
 		    image_count,                                         // image_count
 		    data->comp_images,                                   // out_images
-		    data->comp_handles);                                 // out_handles
+		    data->comp_handles,                                  // out_handles
+		    image_mem_size);                                     // out_image_mem_size (in bytes)
 		if (xret != XRT_SUCCESS) {
 			return xret;
 		}
@@ -629,7 +632,8 @@ try {
 	std::vector<wil::unique_handle> &handles = compositorNeedsCopy ? data->comp_handles : data->handles;
 
 	// Import into the native compositor, to create the corresponding swapchain which we wrap.
-	xret = xrt::compositor::client::importFromHandleDuplicates(*(c->xcn), handles, vkinfo, true, sc->xsc);
+	xret = xrt::compositor::client::importFromHandleDuplicates(*(c->xcn), handles, vkinfo, image_mem_size, true,
+	                                                           sc->xsc);
 	if (xret != XRT_SUCCESS) {
 		D3D_ERROR(c, "Error importing D3D swapchain into native compositor");
 		return xret;
@@ -745,8 +749,8 @@ client_d3d12_compositor_end_session(struct xrt_compositor *xc)
 static xrt_result_t
 client_d3d12_compositor_wait_frame(struct xrt_compositor *xc,
                                    int64_t *out_frame_id,
-                                   uint64_t *predicted_display_time,
-                                   uint64_t *predicted_display_period)
+                                   int64_t *predicted_display_time,
+                                   int64_t *predicted_display_period)
 {
 	struct client_d3d12_compositor *c = as_client_d3d12_compositor(xc);
 

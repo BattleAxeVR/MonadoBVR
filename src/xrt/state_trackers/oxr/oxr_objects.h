@@ -32,6 +32,7 @@
 #include "oxr_extension_support.h"
 #include "oxr_subaction.h"
 #include "oxr_defines.h"
+#include "oxr_frame_sync.h"
 
 #if defined(XRT_HAVE_D3D11) || defined(XRT_HAVE_D3D12)
 #include <dxgi.h>
@@ -44,6 +45,10 @@
 #include <dlfcn.h>
 #endif // !XRT_OS_WINDOWS
 #endif // XRT_FEATURE_RENDERDOC
+
+#ifdef XRT_OS_ANDROID
+#include "xrt/xrt_android.h"
+#endif // #ifdef XRT_OS_ANDROID
 
 #ifdef __cplusplus
 extern "C" {
@@ -122,7 +127,7 @@ struct oxr_action_set_ref;
 struct oxr_action_ref;
 struct oxr_hand_tracker;
 struct oxr_facial_tracker_htc;
-struct oxr_facial_tracker_fb;
+struct oxr_face_tracker2_fb;
 struct oxr_body_tracker_fb;
 struct oxr_xdev_list;
 
@@ -147,7 +152,7 @@ typedef XrResult (*oxr_handle_destroyer)(struct oxr_logger *log, struct oxr_hand
  */
 
 /*!
- * Safely copy a xrt_pose to a XrPosef.
+ * Safely copy an xrt_pose to an XrPosef.
  */
 #define OXR_XRT_POSE_TO_XRPOSEF(FROM, TO)                                                                              \
 	do {                                                                                                           \
@@ -159,7 +164,7 @@ typedef XrResult (*oxr_handle_destroyer)(struct oxr_logger *log, struct oxr_hand
 	} while (false)
 
 /*!
- * Safely copy a xrt_fov to a XrFovf.
+ * Safely copy an xrt_fov to an XrFovf.
  */
 #define OXR_XRT_FOV_TO_XRFOVF(FROM, TO)                                                                                \
 	do {                                                                                                           \
@@ -413,6 +418,18 @@ oxr_body_tracker_fb_to_openxr(struct oxr_body_tracker_fb *body_tracker_fb)
 }
 #endif
 
+#ifdef OXR_HAVE_FB_face_tracking2
+/*!
+ * To go back to a OpenXR object.
+ *
+ * @relates oxr_face_tracker2_fb
+ */
+static inline XrFaceTracker2FB
+oxr_face_tracker2_fb_to_openxr(struct oxr_face_tracker2_fb *face_tracker2_fb)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrFaceTracker2FB, face_tracker2_fb);
+}
+#endif
 /*!
  *
  * @name oxr_input.c
@@ -1035,6 +1052,12 @@ oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
                                          bool *supports_eye,
                                          bool *supports_lip);
 
+void
+oxr_system_get_face_tracking2_fb_support(struct oxr_logger *log,
+                                         struct oxr_instance *inst,
+                                         bool *supports_audio,
+                                         bool *supports_visual);
+
 bool
 oxr_system_get_body_tracking_fb_support(struct oxr_logger *log, struct oxr_instance *inst);
 
@@ -1106,9 +1129,6 @@ oxr_poll_event(struct oxr_logger *log, struct oxr_instance *inst, XrEventDataBuf
 
 void
 oxr_xdev_destroy(struct xrt_device **xdev_ptr);
-
-void
-oxr_xdev_update(struct xrt_device *xdev);
 
 /*!
  * Return true if it finds an input of that name on this device.
@@ -1425,7 +1445,7 @@ struct oxr_handle_base
  *
  * Not strictly an object, but an atom.
  *
- * Valid only within a XrInstance (@ref oxr_instance)
+ * Valid only within an XrInstance (@ref oxr_instance)
  *
  * @obj{XrSystemId}
  */
@@ -1483,6 +1503,7 @@ struct oxr_system
 		bool external_semaphore_fd_enabled;
 		bool timeline_semaphore_enabled;
 		bool debug_utils_enabled;
+		bool image_format_list_enabled;
 	} vk;
 
 #endif
@@ -1689,6 +1710,9 @@ struct oxr_instance
 		 * XR_ERROR_VALIDATION_FAILURE in xrCreateReferenceSpace.
 		 */
 		bool no_validation_error_in_create_ref_space;
+
+		//! For applications that rely on views being parallel, notably some OpenVR games with OpenComposite.
+		bool parallel_views;
 	} quirks;
 
 	//! Debug messengers
@@ -1702,6 +1726,10 @@ struct oxr_instance
 #ifdef XRT_FEATURE_RENDERDOC
 	RENDERDOC_API_1_4_1 *rdoc_api;
 #endif
+
+#ifdef XRT_OS_ANDROID
+	enum xrt_android_lifecycle_event activity_state;
+#endif // XRT_OS_ANDROID
 };
 
 /*!
@@ -1732,7 +1760,7 @@ struct oxr_session
 	struct oxr_session *next;
 
 	XrSessionState state;
-	bool has_begun;
+
 	/*!
 	 * There is a extra state between xrBeginSession has been called and
 	 * the first xrEndFrame has been called. These are to track this.
@@ -1756,7 +1784,7 @@ struct oxr_session
 		int64_t begun;
 	} frame_id;
 
-	struct os_semaphore sem;
+	struct oxr_frame_sync frame_sync;
 
 	/*!
 	 * Used to implement precise extra sleeping in wait frame.
@@ -2742,6 +2770,43 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
                           struct oxr_space *base_spc,
                           const XrBodyJointsLocateInfoFB *locateInfo,
                           XrBodyJointLocationsFB *locations);
+#endif
+
+#ifdef OXR_HAVE_FB_face_tracking2
+/*!
+ * FB specific Face tracker2.
+ *
+ * Parent type/handle is @ref oxr_instance
+ *
+ * @obj{XrFaceTracker2FB}
+ * @extends oxr_handle_base
+ */
+struct oxr_face_tracker2_fb
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this face tracker.
+	struct oxr_session *sess;
+
+	//! xrt_device backing this face tracker
+	struct xrt_device *xdev;
+
+	bool audio_enabled;
+	bool visual_enabled;
+};
+
+XrResult
+oxr_face_tracker2_fb_create(struct oxr_logger *log,
+                            struct oxr_session *sess,
+                            const XrFaceTrackerCreateInfo2FB *createInfo,
+                            struct oxr_face_tracker2_fb **out_face_tracker2_fb);
+
+XrResult
+oxr_get_face_expression_weights2_fb(struct oxr_logger *log,
+                                    struct oxr_face_tracker2_fb *face_tracker2_fb,
+                                    const XrFaceExpressionInfo2FB *expression_info,
+                                    XrFaceExpressionWeights2FB *expression_weights);
 #endif
 
 #ifdef OXR_HAVE_MNDX_xdev_space

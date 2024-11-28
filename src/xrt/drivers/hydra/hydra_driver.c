@@ -443,7 +443,7 @@ hydra_device_update_input_click(struct hydra_device *hd, timepoint_ns now, int i
  *
  */
 
-static void
+static xrt_result_t
 hydra_device_update_inputs(struct xrt_device *xdev)
 {
 	struct hydra_device *hd = hydra_device(xdev);
@@ -478,12 +478,14 @@ hydra_device_update_inputs(struct xrt_device *xdev)
 		// inputs[HYDRA_INDEX_POSE].timestamp = now;
 		// inputs[HYDRA_INDEX_POSE].value.
 	}
+
+	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 hydra_device_get_tracked_pose(struct xrt_device *xdev,
                               enum xrt_input_name name,
-                              uint64_t at_timestamp_ns,
+                              int64_t at_timestamp_ns,
                               struct xrt_space_relation *out_relation)
 {
 	struct hydra_device *hd = hydra_device(xdev);
@@ -503,6 +505,8 @@ hydra_device_get_tracked_pose(struct xrt_device *xdev,
 	// HYDRA_SPEW(hd, "GET_TRACKED_POSE (%f, %f, %f) (%f, %f, %f, %f) ",
 	// pos.x,
 	//            pos.y, pos.z, quat.x, quat.y, quat.z, quat.w);
+
+	return XRT_SUCCESS;
 }
 
 static void
@@ -595,9 +599,9 @@ hydra_found(struct xrt_prober *xp,
 	hs->base.type = XRT_TRACKING_TYPE_HYDRA;
 	snprintf(hs->base.name, XRT_TRACKING_NAME_LEN, "%s", "Razer Hydra magnetic tracking");
 	// Arbitrary static transform from local space to base.
-	hs->base.offset.position.y = 1.0f;
-	hs->base.offset.position.z = -0.25f;
-	hs->base.offset.orientation.w = 1.0f;
+	hs->base.initial_offset.position.y = 1.0f;
+	hs->base.initial_offset.position.z = -0.25f;
+	hs->base.initial_offset.orientation.w = 1.0f;
 
 	hs->data_hid = data_hid;
 	hs->command_hid = command_hid;

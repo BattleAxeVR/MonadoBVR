@@ -35,7 +35,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <inttypes.h>
 
 
 /*
@@ -129,6 +128,7 @@ convert_layer_flags(XrSwapchainUsageFlags xr_flags)
 	return flags;
 }
 
+#ifdef OXR_HAVE_FB_composition_layer_depth_test
 static enum xrt_compare_op_fb
 convert_compare_op(XrCompareOpFB xr_compare_op)
 {
@@ -144,6 +144,7 @@ convert_compare_op(XrCompareOpFB xr_compare_op)
 	default: return XRT_COMPARE_OP_MAX_ENUM_FB;
 	}
 }
+#endif
 
 static enum xrt_layer_eye_visibility
 convert_eye_visibility(XrSwapchainUsageFlags xr_visibility)
@@ -1291,12 +1292,12 @@ submit_projection_layer(struct oxr_session *sess,
                         uint64_t xrt_timestamp)
 {
 	struct oxr_space *spc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, proj->space);
-	struct oxr_swapchain *d_scs[XRT_MAX_VIEWS];
-	struct oxr_swapchain *scs[XRT_MAX_VIEWS];
-	struct xrt_pose *pose_ptr;
-	struct xrt_pose pose[XRT_MAX_VIEWS];
-	struct xrt_swapchain *swapchains[XRT_MAX_VIEWS];
-	struct xrt_swapchain *d_swapchains[XRT_MAX_VIEWS];
+	struct oxr_swapchain *d_scs[XRT_MAX_VIEWS] = {0};
+	struct oxr_swapchain *scs[XRT_MAX_VIEWS] = {0};
+	struct xrt_pose *pose_ptr = NULL;
+	struct xrt_pose pose[XRT_MAX_VIEWS] = {0};
+	struct xrt_swapchain *swapchains[XRT_MAX_VIEWS] = {0};
+	struct xrt_swapchain *d_swapchains[XRT_MAX_VIEWS] = {0};
 
 	enum xrt_layer_composition_flags flags = convert_layer_flags(proj->layerFlags);
 
@@ -1787,7 +1788,7 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 	do_synchronize_state_change(log, sess);
 
 	struct xrt_pose inv_offset = {0};
-	math_pose_invert(&xdev->tracking_origin->offset, &inv_offset);
+	math_pose_invert(&xdev->tracking_origin->initial_offset, &inv_offset);
 
 	struct xrt_layer_frame_data data = {
 	    .frame_id = sess->frame_id.begun,

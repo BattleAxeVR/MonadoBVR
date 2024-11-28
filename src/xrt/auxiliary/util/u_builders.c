@@ -113,33 +113,33 @@ u_builder_setup_tracking_origins(struct xrt_device *head,
 	struct xrt_tracking_origin *right_origin = right ? right->tracking_origin : NULL;
 
 	if (left_origin != NULL && left_origin->type == XRT_TRACKING_TYPE_NONE) {
-		left_origin->offset.position.x = -0.2f;
-		left_origin->offset.position.y = 1.3f;
-		left_origin->offset.position.z = -0.5f;
+		left_origin->initial_offset.position.x = -0.2f;
+		left_origin->initial_offset.position.y = 1.3f;
+		left_origin->initial_offset.position.z = -0.5f;
 	}
 
 	if (right_origin != NULL && right_origin->type == XRT_TRACKING_TYPE_NONE) {
-		right_origin->offset.position.x = 0.2f;
-		right_origin->offset.position.y = 1.3f;
-		right_origin->offset.position.z = -0.5f;
+		right_origin->initial_offset.position.x = 0.2f;
+		right_origin->initial_offset.position.y = 1.3f;
+		right_origin->initial_offset.position.z = -0.5f;
 	}
 
 	// Head comes last, because left and right may share tracking origin.
 	if (head_origin != NULL && head_origin->type == XRT_TRACKING_TYPE_NONE) {
 		// "nominal height" 1.6m
-		head_origin->offset.position.x = 0.0f;
-		head_origin->offset.position.y = 1.6f;
-		head_origin->offset.position.z = 0.0f;
+		head_origin->initial_offset.position.x = 0.0f;
+		head_origin->initial_offset.position.y = 1.6f;
+		head_origin->initial_offset.position.z = 0.0f;
 	}
 
 	if (head_origin) {
-		apply_offset(&head_origin->offset.position, global_tracking_origin_offset);
+		apply_offset(&head_origin->initial_offset.position, global_tracking_origin_offset);
 	}
 	if (left_origin && left_origin != head_origin) {
-		apply_offset(&left->tracking_origin->offset.position, global_tracking_origin_offset);
+		apply_offset(&left->tracking_origin->initial_offset.position, global_tracking_origin_offset);
 	}
 	if (right_origin && right_origin != head_origin && right_origin != left_origin) {
-		apply_offset(&right->tracking_origin->offset.position, global_tracking_origin_offset);
+		apply_offset(&right->tracking_origin->initial_offset.position, global_tracking_origin_offset);
 	}
 }
 
@@ -151,6 +151,7 @@ u_builder_create_space_overseer_legacy(struct xrt_session_event_sink *broadcast,
                                        struct xrt_device **xdevs,
                                        uint32_t xdev_count,
                                        bool root_is_unbounded,
+                                       bool per_app_local_spaces,
                                        struct xrt_space_overseer **out_xso)
 {
 	/*
@@ -185,7 +186,9 @@ u_builder_create_space_overseer_legacy(struct xrt_session_event_sink *broadcast,
 	    xdev_count,                // xdev_count
 	    head,                      // head
 	    &T_stage_local,            // local_offset
-	    root_is_unbounded);        // root_is_unbounded
+	    root_is_unbounded,         // root_is_unbounded
+	    per_app_local_spaces       // per_app_local_spaces
+	);
 
 	*out_xso = (struct xrt_space_overseer *)uso;
 }
@@ -248,6 +251,7 @@ u_builder_roles_helper_open_system(struct xrt_builder *xb,
 	    xsysd->xdevs,                       // xdevs
 	    xsysd->xdev_count,                  // xdev_count
 	    false,                              // root_is_unbounded
+	    true,                               // per_app_local_spaces
 	    out_xso);                           // out_xso
 
 	return XRT_SUCCESS;

@@ -21,7 +21,6 @@
 #include "xrt/xrt_defines.h"
 
 #include <stdio.h>
-#include <inttypes.h>
 
 
 /*
@@ -41,6 +40,23 @@ find_suitable_pose_name(struct xrt_device *xdev)
 		case XRT_INPUT_GENERIC_HEAD_POSE: return name;
 		case XRT_INPUT_GENERIC_TRACKER_POSE: return name;
 		case XRT_INPUT_INDEX_GRIP_POSE: return name;
+		case XRT_INPUT_SIMPLE_GRIP_POSE: return name;
+		case XRT_INPUT_VIVE_GRIP_POSE: return name;
+		case XRT_INPUT_VIVE_COSMOS_GRIP_POSE: return name;
+		case XRT_INPUT_VIVE_FOCUS3_GRIP_POSE: return name;
+		case XRT_INPUT_VIVE_TRACKER_GRIP_POSE: return name;
+		case XRT_INPUT_WMR_GRIP_POSE: return name;
+		case XRT_INPUT_PSMV_GRIP_POSE: return name;
+		case XRT_INPUT_G2_CONTROLLER_GRIP_POSE: return name;
+		case XRT_INPUT_GO_GRIP_POSE: return name;
+		case XRT_INPUT_ODYSSEY_CONTROLLER_GRIP_POSE: return name;
+		case XRT_INPUT_TOUCH_GRIP_POSE: return name;
+		case XRT_INPUT_TOUCH_PLUS_GRIP_POSE: return name;
+		case XRT_INPUT_TOUCH_PRO_GRIP_POSE: return name;
+		case XRT_INPUT_PICO_G3_GRIP_POSE: return name;
+		case XRT_INPUT_PICO_NEO3_GRIP_POSE: return name;
+		case XRT_INPUT_PICO4_GRIP_POSE: return name;
+		case XRT_INPUT_OPPO_MR_GRIP_POSE: return name;
 		default: break;
 		}
 	}
@@ -67,14 +83,6 @@ oxr_xdev_destroy(struct xrt_device **xdev_ptr)
 
 	xdev->destroy(xdev);
 	*xdev_ptr = NULL;
-}
-
-void
-oxr_xdev_update(struct xrt_device *xdev)
-{
-	if (xdev != NULL) {
-		xrt_device_update_inputs(xdev);
-	}
 }
 
 bool
@@ -123,11 +131,11 @@ oxr_xdev_get_hand_tracking_at(struct oxr_logger *log,
                               struct xrt_hand_joint_set *out_value)
 {
 	//! Convert at_time to monotonic and give to device.
-	uint64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, at_time);
+	int64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, at_time);
 
 	struct xrt_hand_joint_set value;
 
-	uint64_t ignored;
+	int64_t ignored;
 
 	xrt_device_get_hand_tracking(xdev, name, at_timestamp_ns, &value, &ignored);
 

@@ -762,7 +762,7 @@ flush_poses(TrackerSlam &t)
 
 		// Last relation
 		xrt_space_relation lr = XRT_SPACE_RELATION_ZERO;
-		uint64_t lts;
+		int64_t lts;
 		t.slam_rels.get_latest(&lts, &lr);
 		xrt_vec3 lpos = lr.pose.position;
 		xrt_quat lrot = lr.pose.orientation;
@@ -907,7 +907,7 @@ predict_pose(TrackerSlam &t, timepoint_ns when_ns, struct xrt_space_relation *ou
 
 	// Get last relation computed purely from SLAM data
 	xrt_space_relation rel{};
-	uint64_t rel_ts;
+	int64_t rel_ts;
 	bool empty = !t.slam_rels.get_latest(&rel_ts, &rel);
 
 	// Stop if there is no previous relation to use for prediction
@@ -1075,8 +1075,8 @@ setup_ui(TrackerSlam &t)
 	u_var_add_ro_ff_vec3_f32(&t, t.accel_ff, "Accelerometer");
 	u_var_add_f32(&t, &t.gravity_correction.z, "Gravity Correction");
 	for (size_t i = 0; i < t.ui_sink.size(); i++) {
-		char label[] = "Camera NNNN";
-		(void)snprintf(label, sizeof(label), "Camera %zu", i);
+		char label[64] = {0};
+		snprintf(label, sizeof(label), "Camera %zu", i);
 		u_var_add_sink_debug(&t, &t.ui_sink[i], label);
 	}
 

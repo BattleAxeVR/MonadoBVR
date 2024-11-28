@@ -881,7 +881,7 @@ public:
 		struct xrt_space_relation rel;
 		xrt_device_get_tracked_pose(m_xdev, grip_name, now_ns, &rel);
 
-		struct xrt_pose *offset = &m_xdev->tracking_origin->offset;
+		struct xrt_pose *offset = &m_xdev->tracking_origin->initial_offset;
 
 		struct xrt_relation_chain chain = {};
 		m_relation_chain_push_relation(&chain, &rel);
@@ -970,7 +970,7 @@ public:
 
 			timepoint_ns now_ns = os_monotonic_get_ns();
 			struct xrt_hand_joint_set out_joint_set_value;
-			uint64_t out_timestamp_ns;
+			int64_t out_timestamp_ns;
 
 			m_xdev->get_hand_tracking(m_xdev,
 			                          m_hand == XRT_HAND_LEFT ? XRT_INPUT_GENERIC_HAND_TRACKING_LEFT
@@ -1249,15 +1249,15 @@ CDeviceDriver_Monado::DebugRequest(const char *pchRequest, char *pchResponseBuff
 	//! @todo
 }
 
-static inline vr::HmdQuaternion_t
+static constexpr inline vr::HmdQuaternion_t
 HmdQuaternion_Init(double w, double x, double y, double z)
 {
-	vr::HmdQuaternion_t quat;
-	quat.w = w;
-	quat.x = x;
-	quat.y = y;
-	quat.z = z;
-	return quat;
+	return vr::HmdQuaternion_t{
+	    .w = w,
+	    .x = x,
+	    .y = y,
+	    .z = z,
+	};
 }
 
 vr::DriverPose_t
@@ -1268,30 +1268,38 @@ CDeviceDriver_Monado::GetPose()
 	struct xrt_space_relation rel;
 	xrt_device_get_tracked_pose(m_xdev, XRT_INPUT_GENERIC_HEAD_POSE, now_ns, &rel);
 
-	struct xrt_pose *offset = &m_xdev->tracking_origin->offset;
+	struct xrt_pose *offset = &m_xdev->tracking_origin->initial_offset;
 
 	struct xrt_relation_chain chain = {};
 	m_relation_chain_push_relation(&chain, &rel);
 	m_relation_chain_push_pose_if_not_identity(&chain, offset);
 	m_relation_chain_resolve(&chain, &rel);
 
-	vr::DriverPose_t t = {};
+	vr::DriverPose_t t = {
+	    // monado predicts pose "now", see xrt_device_get_tracked_pose
+	    .poseTimeOffset = 0,
+	    .qWorldFromDriverRotation = HmdQuaternion_Init(1, 0, 0, 0),
+	    .vecWorldFromDriverTranslation = {0, 0, 0},
 
+	    .qDriverFromHeadRotation = HmdQuaternion_Init(1, 0, 0, 0),
+	    .vecDriverFromHeadTranslation = {0, 0, 0},
 
-	// monado predicts pose "now", see xrt_device_get_tracked_pose
-	t.poseTimeOffset = 0;
+	    .vecPosition = {0, 0, 0},
+	    .vecVelocity = {0, 0, 0},
+	    .vecAcceleration = {0, 0, 0},
 
-	//! @todo: Monado head model?
-	t.shouldApplyHeadModel = !m_xdev->position_tracking_supported;
-	t.willDriftInYaw = !m_xdev->position_tracking_supported;
+	    .qRotation = HmdQuaternion_Init(1, 0, 0, 0),
 
-	t.qWorldFromDriverRotation = HmdQuaternion_Init(1, 0, 0, 0);
-	t.qDriverFromHeadRotation = HmdQuaternion_Init(1, 0, 0, 0);
+	    .vecAngularVelocity = {0, 0, 0},
+	    .vecAngularAcceleration = {0, 0, 0},
 
-	t.poseIsValid = rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT;
-	t.result = vr::TrackingResult_Running_OK;
-	t.deviceIsConnected = true;
-
+	    .result = vr::TrackingResult_Running_OK,
+	    .poseIsValid = (rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0,
+	    .willDriftInYaw = !m_xdev->position_tracking_supported,
+	    //! @todo: Monado head model?
+	    .shouldApplyHeadModel = !m_xdev->position_tracking_supported,
+	    .deviceIsConnected = true,
+	};
 	apply_pose(&rel, &t);
 
 #ifdef DUMP_POSE

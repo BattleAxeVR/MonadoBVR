@@ -42,7 +42,7 @@ if(NOT WIN32)
 		APPEND_STRING
 		PROPERTY
 			LINK_FLAGS
-			"-u xrNegotiateLoaderRuntimeInterface -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libopenxr.version"
+			"-u xrNegotiateLoaderRuntimeInterface -Wl,--version-script=\"${CMAKE_CURRENT_SOURCE_DIR}/libopenxr.version\""
 		)
 	# Re-link if the version script changes.
 	set_property(
@@ -64,8 +64,14 @@ else()
 	set(DEV_MANIFEST_OUTPUT "${CMAKE_BINARY_DIR}/${RUNTIME_TARGET}-dev.json")
 endif()
 
+set(_libmonado_arg)
+if(TARGET monado)
+	set(_libmonado_arg LIBMONADO monado)
+endif()
+
 include(GenerateOpenXRRuntimeManifest)
 generate_openxr_runtime_manifest_buildtree(
+	${_libmonado_arg}
 	RUNTIME_TARGET ${RUNTIME_TARGET} #
 	OUT_FILE ${DEV_MANIFEST_OUTPUT}
 	)
@@ -118,7 +124,7 @@ elseif(NOT ANDROID)
 		set(_extra_args RUNTIME_DIR_RELATIVE_TO_MANIFEST ../../../${CMAKE_INSTALL_LIBDIR})
 	endif()
 	generate_openxr_runtime_manifest_at_install(
-		${_extra_args}
+		${_extra_args} ${_libmonado_arg}
 		RUNTIME_TARGET ${RUNTIME_TARGET}
 		DESTINATION share/openxr/${XR_API_MAJOR}
 		RELATIVE_RUNTIME_DIR ${CMAKE_INSTALL_LIBDIR}

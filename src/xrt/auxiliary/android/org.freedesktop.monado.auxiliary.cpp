@@ -24,6 +24,8 @@ namespace org::freedesktop::monado::auxiliary {
 	                                                   "(Landroid/content/Context;)Landroid/util/DisplayMetrics;")),
 	      getDisplayRefreshRate(
 	          classRef().getStaticMethod("getDisplayRefreshRate", "(Landroid/content/Context;)F")),
+	      getSupportedRefreshRates(
+	          classRef().getStaticMethod("getSupportedRefreshRates", "(Landroid/content/Context;)[F")),
 	      getNativePointer(classRef().getMethod("getNativePointer", "()J")),
 	      markAsDiscardedByNative(classRef().getMethod("markAsDiscardedByNative", "()V")),
 	      waitGetSurfaceHolder(classRef().getMethod("waitGetSurfaceHolder", "(I)Landroid/view/SurfaceHolder;")),
@@ -31,6 +33,12 @@ namespace org::freedesktop::monado::auxiliary {
 	          classRef().getStaticMethod("getDisplayModeIdWidth", "(Landroid/content/Context;II)I")),
 	      getDisplayModeIdHeight(
 	          classRef().getStaticMethod("getDisplayModeIdHeight", "(Landroid/content/Context;II)I"))
+	{}
+
+	ActivityLifecycleListener::Meta::Meta(jni::jclass clazz)
+	    : MetaBase(ActivityLifecycleListener::getTypeName(), clazz), init(classRef().getMethod("<init>", "(J)V")),
+	      registerCallback(classRef().getMethod("registerCallback", "(Landroid/app/Activity;)V")),
+	      unregisterCallback(classRef().getMethod("unregisterCallback", "(Landroid/app/Activity;)V"))
 	{}
 } // namespace org::freedesktop::monado::auxiliary
 } // namespace wrap

@@ -21,10 +21,9 @@
 #include <stdio.h>
 #include <time.h>
 #include <assert.h>
-#include <inttypes.h>
 
 #include "math/m_api.h"
-#include "math/m_clock_offset.h"
+#include "math/m_clock_tracking.h"
 #include "math/m_space.h"
 #include "math/m_vec3.h"
 
@@ -68,10 +67,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(rift_s_slam, "RIFT_S_SLAM", true)
 //! Specifies whether the user wants to use the hand tracker.
 DEBUG_GET_ONCE_BOOL_OPTION(rift_s_handtracking, "RIFT_S_HANDTRACKING", true)
 
-static void
+static xrt_result_t
 rift_s_tracker_get_tracked_pose_imu(struct xrt_device *xdev,
                                     enum xrt_input_name name,
-                                    uint64_t at_timestamp_ns,
+                                    int64_t at_timestamp_ns,
                                     struct xrt_space_relation *out_relation);
 
 static void
@@ -609,16 +608,21 @@ rift_s_tracker_correct_pose_from_basalt(struct xrt_pose *pose)
 	math_quat_rotate_vec3(&q, &pose->position, &pose->position);
 }
 
-static void
+static xrt_result_t
 rift_s_tracker_get_tracked_pose_imu(struct xrt_device *xdev,
                                     enum xrt_input_name name,
-                                    uint64_t at_timestamp_ns,
+                                    int64_t at_timestamp_ns,
                                     struct xrt_space_relation *out_relation)
 {
 	struct rift_s_tracker *tracker = (struct rift_s_tracker *)(xdev);
-	assert(name == XRT_INPUT_GENERIC_TRACKER_POSE);
+	if (name != XRT_INPUT_GENERIC_TRACKER_POSE) {
+		U_LOG_XDEV_UNSUPPORTED_INPUT(&tracker->base, rift_s_log_level, name);
+		return XRT_ERROR_INPUT_UNSUPPORTED;
+	}
 
 	rift_s_tracker_get_tracked_pose(tracker, RIFT_S_TRACKER_POSE_IMU, at_timestamp_ns, out_relation);
+
+	return XRT_SUCCESS;
 }
 
 void
